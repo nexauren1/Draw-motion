@@ -8,8 +8,11 @@
 
 - Desenho por toque com pincel, borracha, linha, retângulo e elipse.
 - Paleta rápida de cores e controlo do tamanho do pincel.
+- Página inicial em modo vertical, com navegação para Projetos, Definições e Sobre.
+- Editor em modo horizontal e imersivo, com a área de desenho central e ferramentas nas laterais.
 - Palco 16:9 com zoom, deslocamento e rotação por gestos de dois dedos, além de controlos manuais.
-- Timeline com criação, duplicação e remoção de frames.
+- Timeline compacta com criação, duplicação e remoção de frames.
+- Definições persistentes para FPS inicial, onion skin e ecrã imersivo.
 - Onion skin para visualizar frames adjacentes.
 - Pré-visualização e velocidade ajustável entre 1 e 30 FPS.
 - Desfazer/refazer; mudanças de gestos para dois dedos não devem deixar marcas acidentais.
