@@ -7,8 +7,14 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Paint as AndroidPaint
 import android.graphics.Path as AndroidPath
 import android.graphics.RectF
+import android.media.Image
+import android.media.MediaCodec
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Bundle
+import java.io.File
+import java.io.FileInputStream
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -28,6 +34,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,6 +50,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,6 +63,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +78,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -79,7 +89,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.toArgb
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
@@ -102,11 +115,24 @@ private val TextPrimary = Color(0xFFF2F3F8)
 private val TextMuted = Color(0xFF9AA2B4)
 
 private enum class DrawingTool(val label: String, val symbol: String) {
+    PEN("Caneta fina", "✒"),
     BRUSH("Pincel", "✎"),
+    PENCIL("Lápis", "／"),
+    MARKER("Marcador", "▰"),
+    HIGHLIGHTER("Realçador", "▱"),
+    AIRBRUSH("Aerógrafo", "☁"),
+    CALLIGRAPHY("Caligrafia", "𝓐"),
     ERASER("Borracha", "⌫"),
     LINE("Linha", "／"),
     RECTANGLE("Retângulo", "□"),
-    ELLIPSE("Elipse", "◯")
+    ELLIPSE("Elipse", "◯"),
+    RULER("Régua", "▤")
+}
+
+private enum class InputMode(val label: String) {
+    BOTH("Dedo + lápis"),
+    TOUCH("Só dedo"),
+    STYLUS("Só lápis")
 }
 
 private data class InkStroke(
@@ -122,9 +148,18 @@ private class AnimationFrame(
 )
 
 private data class SavedProject(
+    val projectName: String,
     val frames: List<AnimationFrame>,
     val currentFrame: Int,
     val fps: Int
+)
+
+private data class ProjectInfo(
+    val name: String,
+    val frameCount: Int,
+    val strokeCount: Int,
+    val fps: Int,
+    val updatedAt: Long
 )
 
 class MainActivity : ComponentActivity() {
@@ -154,9 +189,23 @@ private fun DrawmotionApp() {
     var revision by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(false) }
     var showEffects by remember { mutableStateOf(false) }
+    var showProjectsDialog by remember { mutableStateOf(false) }
+    var showNewProjectDialog by remember { mutableStateOf(false) }
+    var duplicateCurrentOnCreate by remember { mutableStateOf(false) }
+    var newProjectName by remember { mutableStateOf("") }
+    var currentProjectName by remember { mutableStateOf("Meu projeto") }
+    var inputMode by remember { mutableStateOf(InputMode.BOTH) }
+    var showGrid by remember { mutableStateOf(true) }
+    var isExporting by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf("") }
     val undoStack = remember { mutableStateListOf<List<InkStroke>>() }
     val redoStack = remember { mutableStateListOf<List<InkStroke>>() }
+    val projectCatalog = remember { mutableStateListOf<ProjectInfo>() }
+    val coroutineScope = rememberCoroutineScope()
+    val refreshProjectCatalog: () -> Unit = {
+        projectCatalog.clear()
+        projectCatalog.addAll(listProjectInfos(context))
+    }
 
     val activeFrame = frames.getOrNull(currentFrameIndex) ?: frames.first()
 
@@ -167,9 +216,11 @@ private fun DrawmotionApp() {
             frames.addAll(loaded.frames)
             currentFrameIndex = loaded.currentFrame.coerceIn(0, frames.lastIndex)
             fps = loaded.fps.coerceIn(1, 30)
+            currentProjectName = loaded.projectName
             revision++
             notice = "Projeto local carregado"
         }
+        refreshProjectCatalog()
     }
 
     LaunchedEffect(isPlaying, fps, frames.size) {
@@ -180,10 +231,10 @@ private fun DrawmotionApp() {
     }
 
     // Autosave after edits, but never serialize every frame while preview playback is running.
-    LaunchedEffect(revision, fps, frames.size, currentFrameIndex, isPlaying) {
+    LaunchedEffect(revision, fps, frames.size, currentFrameIndex, isPlaying, currentProjectName) {
         if (!isPlaying) {
             delay(650)
-            saveProject(context, frames, currentFrameIndex, fps)
+            saveProject(context, frames, currentFrameIndex, fps, currentProjectName)
         }
     }
 
@@ -207,6 +258,26 @@ private fun DrawmotionApp() {
                 notice = "Frame exportado em PNG"
             } catch (_: Exception) {
                 notice = "Não foi possível exportar o PNG"
+            }
+        }
+    }
+
+    val videoExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("video/mp4")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val snapshot = frames.map { frame ->
+                AnimationFrame(frame.number, frame.strokes.toMutableList())
+            }
+            val exportFps = fps
+            isPlaying = false
+            isExporting = true
+            coroutineScope.launch {
+                val success = withContext(Dispatchers.IO) {
+                    runCatching { exportAnimationMp4(context, snapshot, exportFps, uri) }.getOrDefault(false)
+                }
+                isExporting = false
+                notice = if (success) "Vídeo MP4 exportado" else "Falha ao exportar MP4; verifica o suporte de vídeo do dispositivo"
             }
         }
     }
@@ -252,7 +323,8 @@ private fun DrawmotionApp() {
     }
 
     val saveAction: () -> Unit = {
-        val ok = saveProject(context, frames, currentFrameIndex, fps)
+        val ok = saveProject(context, frames, currentFrameIndex, fps, currentProjectName)
+        refreshProjectCatalog()
         notice = if (ok) "Projeto guardado neste dispositivo" else "Falha ao guardar o projeto"
     }
 
@@ -265,14 +337,32 @@ private fun DrawmotionApp() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             HeaderBar(
+                projectName = currentProjectName,
                 notice = notice,
                 onSave = saveAction,
-                onExport = {
+                onProjects = {
+                    refreshProjectCatalog()
+                    showProjectsDialog = true
+                }
+            )
+
+            ExportPanel(
+                isExporting = isExporting,
+                onExportPng = {
                     exportLauncher.launch("drawmotion-frame-" + (currentFrameIndex + 1) + ".png")
+                },
+                onExportVideo = {
+                    videoExportLauncher.launch("drawmotion-" + safeProjectSlug(currentProjectName) + ".mp4")
                 }
             )
 
             ToolSelector(selectedTool = selectedTool, onSelect = { selectedTool = it })
+            InputModeSelector(
+                selected = inputMode,
+                showGrid = showGrid,
+                onSelect = { inputMode = it },
+                onGridToggle = { showGrid = !showGrid }
+            )
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -285,6 +375,8 @@ private fun DrawmotionApp() {
                     frames = frames,
                     currentFrameIndex = currentFrameIndex,
                     tool = selectedTool,
+                    inputMode = inputMode,
+                    showGrid = showGrid,
                     brushColor = brushColor,
                     brushSize = brushSize,
                     onionSkin = onionSkin,
@@ -356,7 +448,7 @@ private fun DrawmotionApp() {
             )
 
             Text(
-                text = "Dica: desenha com um dedo. Usa dois dedos para mover, rodar e ampliar o palco.",
+                text = "Dica: seleciona dedo, caneta digital ou ambos. Usa dois dedos para mover, rodar e ampliar o palco.",
                 color = TextMuted,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
