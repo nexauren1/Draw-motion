@@ -633,6 +633,74 @@ private fun DrawmotionApp() {
         }
     }
 
+    if (showBrushesDialog) {
+        AlertDialog(
+            onDismissRequest = { showBrushesDialog = false },
+            containerColor = PanelBackground,
+            title = { Text("Biblioteca de pincéis", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    BrushPreset.values().forEach { preset ->
+                        BrushPresetOption(
+                            preset = preset,
+                            selected = selectedBrush == preset,
+                            onClick = {
+                                selectedBrush = preset
+                                selectedTool = DrawingTool.BRUSH
+                                showBrushesDialog = false
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBrushesDialog = false }) {
+                    Text("Fechar", color = Accent)
+                }
+            }
+        )
+    }
+
+    if (showMaterialsDialog) {
+        AlertDialog(
+            onDismissRequest = { showMaterialsDialog = false },
+            containerColor = PanelBackground,
+            title = { Text("Materiais do palco", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    CanvasMaterial.values().forEach { material ->
+                        MaterialPresetOption(
+                            material = material,
+                            selected = canvasMaterial == material,
+                            onClick = {
+                                canvasMaterial = material
+                                revision++
+                                showMaterialsDialog = false
+                            }
+                        )
+                    }
+                    Text(
+                        "O material escolhido também é usado na exportação de imagens e animações.",
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showMaterialsDialog = false }) {
+                    Text("Fechar", color = Accent)
+                }
+            }
+        )
+    }
+
     if (showExportDialog) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
@@ -1034,6 +1102,88 @@ private fun AboutScreen(onBack: () -> Unit) {
 }
 
 @Composable
+private fun BrushPresetOption(
+    preset: BrushPreset,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Color(0xFF332E56) else Color(0xFF252936))
+            .border(1.dp, if (selected) Accent else PanelBorder, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        Box(
+            modifier = Modifier.size(50.dp, 38.dp).clip(RoundedCornerShape(6.dp)).background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val p = Path().apply {
+                    moveTo(5f, size.height * 0.73f)
+                    quadraticTo(size.width * 0.42f, size.height * 0.1f, size.width - 5f, size.height * 0.4f)
+                }
+                drawPath(
+                    p,
+                    color = Color(0xFF252238).copy(alpha = preset.opacity),
+                    style = Stroke(
+                        width = 2.8f * preset.widthScale,
+                        cap = if (preset.squareCaps) StrokeCap.Square else StrokeCap.Round,
+                        pathEffect = if (preset.dashed) PathEffect.dashPathEffect(floatArrayOf(5f, 3f)) else null
+                    )
+                )
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(preset.symbol + "  " + preset.label, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(preset.description, color = TextMuted, fontSize = 9.sp, lineHeight = 12.sp)
+        }
+        if (selected) Text("✓", color = Accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun MaterialPresetOption(
+    material: CanvasMaterial,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Color(0xFF332E56) else Color(0xFF252936))
+            .border(1.dp, if (selected) Accent else PanelBorder, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Canvas(Modifier.size(54.dp, 38.dp).clip(RoundedCornerShape(6.dp))) {
+            drawRect(Color(material.backgroundColor), size = size)
+            material.gridColor?.let { grid ->
+                for (x in 0..size.width.toInt() step 8) {
+                    drawLine(Color(grid), Offset(x.toFloat(), 0f), Offset(x.toFloat(), size.height), 1f)
+                }
+                for (y in 0..size.height.toInt() step 8) {
+                    drawLine(Color(grid), Offset(0f, y.toFloat()), Offset(size.width, y.toFloat()), 1f)
+                }
+            }
+            drawCircle(Color(0xFF8D7CFF), radius = 5f, center = Offset(size.width * 0.68f, size.height * 0.42f))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(material.title, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(material.description, color = TextMuted, fontSize = 9.sp, lineHeight = 12.sp)
+        }
+        if (selected) Text("✓", color = Accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
 private fun ExportOption(title: String, description: String, onClick: () -> Unit) {
     Column(
         modifier = Modifier
@@ -1105,11 +1255,17 @@ private fun EditorScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             RailButton("⌂", "Início", onClick = onHome)
-            DrawingTool.values().forEach { tool ->
+            RailButton(
+                selectedBrush.symbol,
+                "Pincéis",
+                selected = selectedTool == DrawingTool.BRUSH,
+                onClick = onShowBrushes
+            )
+            DrawingTool.values().filter { it != DrawingTool.BRUSH }.forEach { tool ->
                 RailButton(
                     symbol = tool.symbol,
                     label = when (tool) {
-                        DrawingTool.BRUSH -> "Pincel"
+                        DrawingTool.BRUSH -> "Pincéis"
                         DrawingTool.ERASER -> "Apagar"
                         DrawingTool.LINE -> "Linha"
                         DrawingTool.RECTANGLE -> "Rect."
@@ -1208,6 +1364,12 @@ private fun EditorScreen(
         ) {
             Text("CORES", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
             EditorColorGrid(selectedColor = brushColor, onSelect = onColorSelected)
+            RailButton(
+                "▤",
+                "Materiais",
+                selected = canvasMaterial != CanvasMaterial.GRID,
+                onClick = onShowMaterials
+            )
             Spacer(Modifier.weight(1f))
             RailButton(if (isPlaying) "Ⅱ" else "▶", if (isPlaying) "Pausa" else "Reproduzir", onClick = onPlay)
             RailButton(if (onionSkin) "◉" else "○", "Onion", selected = onionSkin, onClick = onOnionSkin)
@@ -1368,6 +1530,8 @@ private fun StageCanvas(
     tool: DrawingTool,
     brushColor: Int,
     brushSize: Float,
+    selectedBrush: BrushPreset,
+    canvasMaterial: CanvasMaterial,
     onionSkin: Boolean,
     zoom: Float,
     rotation: Float,
@@ -1384,6 +1548,7 @@ private fun StageCanvas(
     val latestPan = rememberUpdatedState(pan)
     val latestColor = rememberUpdatedState(brushColor)
     val latestWidth = rememberUpdatedState(brushSize)
+    val latestBrush = rememberUpdatedState(selectedBrush)
     val latestTool = rememberUpdatedState(tool)
     val latestOnCommit = rememberUpdatedState(onCommit)
     val latestZoomChange = rememberUpdatedState(onZoomChange)
@@ -1394,7 +1559,7 @@ private fun StageCanvas(
         modifier = modifier
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.White)
+            .background(Color(canvasMaterial.backgroundColor))
             .pointerInput(tool, currentFrameIndex) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -1402,7 +1567,7 @@ private fun StageCanvas(
                     val points = mutableListOf<Offset>()
                     points.add(pointerToBoard(down.position, size, latestZoom.value, latestRotation.value, latestPan.value))
                     var drawing = true
-                    previewState.value = InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool)
+                    previewState.value = InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool, latestBrush.value)
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -1456,7 +1621,8 @@ private fun StageCanvas(
                                     points.toList(),
                                     latestColor.value,
                                     latestWidth.value,
-                                    startTool
+                                    startTool,
+                                    latestBrush.value
                                 )
                             }
                         }
@@ -1466,7 +1632,7 @@ private fun StageCanvas(
 
                     if (drawing && points.isNotEmpty()) {
                         latestOnCommit.value(
-                            InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool)
+                            InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool, latestBrush.value)
                         )
                     }
                     previewState.value = null
@@ -1474,26 +1640,28 @@ private fun StageCanvas(
             }
     ) {
         val ignoredRevision = revision
-        drawRect(Color.White, size = size)
+        drawRect(Color(canvasMaterial.backgroundColor), size = size)
 
         withTransform({
             scale(size.width / BOARD_WIDTH, size.height / BOARD_HEIGHT, pivot = Offset.Zero)
         }) {
-            for (x in 0..960 step 48) {
-                drawLine(
-                    color = Color(0xFFEDEFF4),
-                    start = Offset(x.toFloat(), 0f),
-                    end = Offset(x.toFloat(), BOARD_HEIGHT),
-                    strokeWidth = 1f
-                )
-            }
-            for (y in 0..540 step 48) {
-                drawLine(
-                    color = Color(0xFFEDEFF4),
-                    start = Offset(0f, y.toFloat()),
-                    end = Offset(BOARD_WIDTH, y.toFloat()),
-                    strokeWidth = 1f
-                )
+            canvasMaterial.gridColor?.let { grid ->
+                for (x in 0..960 step 48) {
+                    drawLine(
+                        color = Color(grid),
+                        start = Offset(x.toFloat(), 0f),
+                        end = Offset(x.toFloat(), BOARD_HEIGHT),
+                        strokeWidth = 1f
+                    )
+                }
+                for (y in 0..540 step 48) {
+                    drawLine(
+                        color = Color(grid),
+                        start = Offset(0f, y.toFloat()),
+                        end = Offset(BOARD_WIDTH, y.toFloat()),
+                        strokeWidth = 1f
+                    )
+                }
             }
 
             withTransform({
