@@ -2370,8 +2370,11 @@ private fun StageCanvas(
                         drawInkStroke(it, opacity = 0.22f, overrideColor = Color(0xFF55B8F2))
                     }
                 }
-                frames.getOrNull(currentFrameIndex)?.strokes?.forEach { drawInkStroke(it) }
-                previewState.value?.let { drawInkStroke(it) }
+                val stageEraserColor = Color(canvasMaterial.backgroundColor)
+                frames.getOrNull(currentFrameIndex)?.strokes?.forEach {
+                    drawInkStroke(it, eraserColor = stageEraserColor)
+                }
+                previewState.value?.let { drawInkStroke(it, eraserColor = stageEraserColor) }
             }
         }
         if (ignoredRevision == Int.MIN_VALUE) drawRect(Color.Transparent)
@@ -2411,12 +2414,29 @@ private fun normalizeAngle(angle: Float): Float {
 private fun DrawScope.drawInkStroke(
     stroke: InkStroke,
     opacity: Float = 1f,
-    overrideColor: Color? = null
+    overrideColor: Color? = null,
+    eraserColor: Color = Color.White
 ) {
     if (stroke.points.isEmpty()) return
-    val inkColor = overrideColor ?: if (stroke.tool == DrawingTool.ERASER) Color.White else Color(stroke.color)
-    val finalColor = inkColor.copy(alpha = inkColor.alpha * opacity)
-    val width = stroke.width.coerceAtLeast(1f)
+    val isEraser = stroke.tool == DrawingTool.ERASER
+    val preset = if (isEraser) BrushPreset.INK else stroke.brush
+    val inkColor = overrideColor ?: if (isEraser) eraserColor else Color(stroke.color)
+    val presetOpacity = if (isEraser) 1f else preset.opacity
+    val finalColor = inkColor.copy(alpha = inkColor.alpha * opacity * presetOpacity)
+    val width = (stroke.width * if (isEraser) 1f else preset.widthScale).coerceAtLeast(1f)
+    val lineCap = if (preset.squareCaps) StrokeCap.Square else StrokeCap.Round
+    val pathEffect = if (preset.dashed) {
+        PathEffect.dashPathEffect(
+            floatArrayOf(max(3f, width * 0.45f), max(2f, width * 0.32f)),
+            0f
+        )
+    } else null
+    val lineStyle = Stroke(
+        width = width,
+        cap = lineCap,
+        join = StrokeJoin.Round,
+        pathEffect = pathEffect
+    )
     val first = stroke.points.first()
     val last = stroke.points.last()
 
@@ -2425,7 +2445,19 @@ private fun DrawScope.drawInkStroke(
             if (stroke.points.size == 1) {
                 drawCircle(finalColor, radius = width / 2f, center = first)
             } else {
-                drawLine(finalColor, first, last, strokeWidth = width, cap = StrokeCap.Round)
+                val linePath = Path().apply {
+                    moveTo(first.x, first.y)
+                    lineTo(last.x, last.y)
+                }
+                if (preset == BrushPreset.AIRBRUSH) {
+                    drawPath(
+                        linePath,
+                        finalColor.copy(alpha = finalColor.alpha * 0.45f),
+                        Stroke(width = width * 2.2f, cap = lineCap, join = StrokeJoin.Round)
+                    )
+                }
+                drawPath(linePath, finalColor, lineStyle)
+
                 if (stroke.tool == DrawingTool.RULER) {
                     val dx = last.x - first.x
                     val dy = last.y - first.y
@@ -2439,7 +2471,8 @@ private fun DrawScope.drawInkStroke(
                                 finalColor,
                                 point - normal * tickSize,
                                 point + normal * tickSize,
-                                strokeWidth = (width * 0.65f).coerceAtLeast(0.7f)
+                                strokeWidth = (width * 0.65f).coerceAtLeast(0.7f),
+                                cap = lineCap
                             )
                         }
                     }
@@ -2460,31 +2493,48 @@ private fun DrawScope.drawInkStroke(
                         color = finalColor,
                         topLeft = Offset(left, top),
                         size = shapeSize,
-                        style = Stroke(width = width)
+                        style = lineStyle
                     )
                 } else {
                     drawOval(
                         color = finalColor,
                         topLeft = Offset(left, top),
                         size = shapeSize,
-                        style = Stroke(width = width)
+                        style = lineStyle
                     )
                 }
             }
         }
         DrawingTool.BRUSH, DrawingTool.ERASER -> {
             if (stroke.points.size == 1) {
-                drawCircle(finalColor, radius = width / 2f, center = first)
+                if (preset.squareCaps) {
+                    drawRect(
+                        color = finalColor,
+                        topLeft = Offset(first.x - width / 2f, first.y - width / 2f),
+                        size = Size(width, width)
+                    )
+                } else {
+                    drawCircle(finalColor, radius = width / 2f, center = first)
+                }
             } else {
                 val path = Path().apply {
                     moveTo(first.x, first.y)
                     stroke.points.drop(1).forEach { lineTo(it.x, it.y) }
                 }
-                drawPath(
-                    path = path,
-                    color = finalColor,
-                    style = Stroke(width = width, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                )
+                if (preset == BrushPreset.AIRBRUSH) {
+                    drawPath(
+                        path,
+                        finalColor.copy(alpha = finalColor.alpha * 0.45f),
+                        Stroke(width = width * 2.2f, cap = lineCap, join = StrokeJoin.Round)
+                    )
+                } else if (preset == BrushPreset.PASTEL) {
+                    drawPath(
+                        path,
+                        finalColor.copy(alpha = finalColor.alpha * 0.22f),
+                        Stroke(width = width * 1.7f, cap = lineCap, join = StrokeJoin.Round)
+                    )
+                }
+                drawPath(path, finalColor, lineStyle)
             }
         }
     }
