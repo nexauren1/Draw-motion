@@ -18,7 +18,8 @@
 - Desfazer/refazer; mudanças de gestos para dois dedos não devem deixar marcas acidentais.
 - Efeitos básicos: espelhar horizontalmente, inverter verticalmente, monocromático e limpar frame.
 - Autosave local automático e botão para guardar imediatamente.
-- Exportação do frame atual para PNG de 1920 × 1080.
+- Exportação do frame atual para PNG (1920 × 1080) e JPEG.
+- Exportação da animação completa para GIF e de todos os frames como sequência PNG dentro de um ZIP.
 - Workflow GitHub Actions para compilar e verificar a estrutura e assinatura do APK.
 
 ## Como descarregar e instalar o APK
@@ -49,6 +50,6 @@ A base ainda precisa de testes em dispositivos reais e de mais funcionalidades: 
 - Pacote Android: `com.nexauren.drawmotion`
 - Linguagem: Kotlin
 - UI e desenho: Jetpack Compose
-- Versão: `0.1.2`
+- Versão: `0.1.3`
 - `minSdk`: 23
 - `targetSdk`: 34
