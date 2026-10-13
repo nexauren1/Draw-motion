@@ -457,6 +457,183 @@ private fun DrawmotionApp() {
         }
     }
 
+    if (showProjectsDialog) {
+        AlertDialog(
+            onDismissRequest = { showProjectsDialog = false },
+            containerColor = PanelBackground,
+            title = { Text("Os meus projetos", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (projectCatalog.isEmpty()) {
+                        Text("Ainda não existem projetos guardados.", color = TextMuted, fontSize = 12.sp)
+                    }
+                    projectCatalog.forEach { project ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF252936)),
+                            shape = RoundedCornerShape(11.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    project.name + if (project.name == currentProjectName) " · aberto" else "",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    "${project.frameCount} frames · ${project.strokeCount} traços · ${project.fps} FPS",
+                                    color = TextMuted,
+                                    fontSize = 10.sp
+                                )
+                                Text(
+                                    "Última alteração: ${formatProjectTimestamp(project.updatedAt)}",
+                                    color = TextMuted,
+                                    fontSize = 9.sp
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            saveProject(context, frames, currentFrameIndex, fps, currentProjectName)
+                                            val loadedProject = loadProject(context, project.name)
+                                            if (loadedProject != null) {
+                                                frames.clear()
+                                                frames.addAll(loadedProject.frames)
+                                                currentFrameIndex = loadedProject.currentFrame.coerceIn(0, frames.lastIndex)
+                                                fps = loadedProject.fps.coerceIn(1, 30)
+                                                currentProjectName = loadedProject.projectName
+                                                undoStack.clear()
+                                                redoStack.clear()
+                                                revision++
+                                                notice = "Projeto aberto"
+                                                showProjectsDialog = false
+                                            } else {
+                                                notice = "Não foi possível abrir este projeto"
+                                            }
+                                        }
+                                    ) { Text("Abrir", color = Accent, fontSize = 11.sp) }
+                                    if (project.name != currentProjectName) {
+                                        TextButton(
+                                            onClick = {
+                                                deleteProjectFile(context, project.name)
+                                                refreshProjectCatalog()
+                                                notice = "Projeto eliminado"
+                                            }
+                                        ) { Text("Eliminar", color = Color(0xFFFF8492), fontSize = 11.sp) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                newProjectName = ""
+                                duplicateCurrentOnCreate = false
+                                showNewProjectDialog = true
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Novo projeto", fontSize = 11.sp) }
+                        OutlinedButton(
+                            onClick = {
+                                newProjectName = "$currentProjectName - cópia"
+                                duplicateCurrentOnCreate = true
+                                showNewProjectDialog = true
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Guardar como", fontSize = 11.sp) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showProjectsDialog = false }) {
+                    Text("Fechar", color = Accent)
+                }
+            }
+        )
+    }
+
+    if (showNewProjectDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewProjectDialog = false },
+            containerColor = PanelBackground,
+            title = {
+                Text(
+                    if (duplicateCurrentOnCreate) "Guardar cópia do projeto" else "Criar projeto",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (duplicateCurrentOnCreate)
+                            "A cópia vai manter os frames e as definições de animação."
+                        else
+                            "Será criado um projeto vazio. O projeto atual fica guardado.",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                    OutlinedTextField(
+                        value = newProjectName,
+                        onValueChange = { newProjectName = it.take(60) },
+                        label = { Text("Nome do projeto") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val name = newProjectName.trim()
+                        if (name.isBlank()) {
+                            notice = "Indica um nome para o projeto"
+                        } else if (projectCatalog.any { it.name.equals(name, ignoreCase = true) }) {
+                            notice = "Já existe um projeto com esse nome"
+                        } else {
+                            saveProject(context, frames, currentFrameIndex, fps, currentProjectName)
+                            val copiedFrames = if (duplicateCurrentOnCreate) {
+                                frames.map { frame ->
+                                    AnimationFrame(frame.number, frame.strokes.toMutableList())
+                                }
+                            } else {
+                                listOf(AnimationFrame(1))
+                            }
+                            frames.clear()
+                            frames.addAll(copiedFrames)
+                            currentFrameIndex = if (duplicateCurrentOnCreate) {
+                                currentFrameIndex.coerceIn(0, frames.lastIndex)
+                            } else {
+                                0
+                            }
+                            if (!duplicateCurrentOnCreate) fps = 12
+                            currentProjectName = name
+                            undoStack.clear()
+                            redoStack.clear()
+                            revision++
+                            val saved = saveProject(context, frames, currentFrameIndex, fps, currentProjectName)
+                            refreshProjectCatalog()
+                            showNewProjectDialog = false
+                            showProjectsDialog = false
+                            notice = if (saved) {
+                                if (duplicateCurrentOnCreate) "Cópia do projeto criada" else "Novo projeto criado"
+                            } else {
+                                "Projeto criado, mas não foi possível guardar"
+                            }
+                        }
+                    }
+                ) { Text("Confirmar", color = Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewProjectDialog = false }) { Text("Cancelar", color = TextMuted) }
+            }
+        )
+    }
+
     if (showEffects) {
         AlertDialog(
             onDismissRequest = { showEffects = false },
