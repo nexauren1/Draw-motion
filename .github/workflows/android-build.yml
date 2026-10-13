@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/*"]
     tags: ["v*"]
     paths:
       - "app/**"
@@ -11,6 +11,7 @@ on:
       - "gradle.properties"
       - ".github/workflows/android-build.yml"
       - "README.md"
+      - "release-notes/**"
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +20,7 @@ on:
       - "build.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-build.yml"
+      - "release-notes/**"
   workflow_dispatch:
 
 permissions:
@@ -76,12 +78,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish APK on version tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Determine release tag
+        id: release_meta
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            TAG="${GITHUB_REF_NAME#release/}"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "asset=Drawmotion-$TAG-android.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release APK filename
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
+        shell: bash
+        run: cp app/build/outputs/apk/debug/app-debug.apk "${{ steps.release_meta.outputs.asset }}"
+
+      - name: Publish APK as GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Drawmotion ${{ github.ref_name }}
-          prerelease: ${{ contains(github.ref_name, 'preview') }}
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Drawmotion ${{ steps.release_meta.outputs.tag }}
+          prerelease: ${{ contains(steps.release_meta.outputs.tag, 'preview') }}
           generate_release_notes: true
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: ${{ steps.release_meta.outputs.asset }}

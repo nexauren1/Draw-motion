@@ -1,51 +1,67 @@
-# Drawmotion — aplicativo Android
+# Drawmotion — estúdio Android de desenho e animação 2D
 
-**Editor nativo de desenho e animação 2D**, desenvolvido em Kotlin com Jetpack Compose. Este é um aplicativo Android; não precisa de uma página web para executar o editor.
+Drawmotion é uma aplicação Android nativa, escrita em Kotlin com Jetpack Compose. O objetivo desta versão é organizar o editor como um estúdio com biblioteca de projetos, ferramentas de desenho e exportação de animações.
 
-> **Estado:** protótipo Android 0.1.1. O APK é uma versão de teste, não uma release estável.
+> **Versão:** 0.2.0-preview.1. Esta é uma pré-versão para testes; ainda exige validação em dispositivos reais antes de ser considerada estável.
 
-## Funcionalidades implementadas
+## Funcionalidades
 
-- Desenho por toque com pincel, borracha, linha, retângulo e elipse.
-- Paleta rápida de cores e controlo do tamanho do pincel.
-- Palco 16:9 com zoom, deslocamento e rotação por gestos de dois dedos, além de controlos manuais.
-- Timeline com criação, duplicação e remoção de frames.
-- Onion skin para visualizar frames adjacentes.
-- Pré-visualização e velocidade ajustável entre 1 e 30 FPS.
-- Desfazer/refazer; mudanças de gestos para dois dedos não devem deixar marcas acidentais.
-- Efeitos básicos: espelhar horizontalmente, inverter verticalmente, monocromático e limpar frame.
-- Autosave local automático e botão para guardar imediatamente.
-- Exportação do frame atual para PNG de 1920 × 1080.
-- Workflow GitHub Actions para compilar e verificar a estrutura e assinatura do APK.
+- **Biblioteca de projetos locais:** criar, abrir, guardar e duplicar projetos separados.
+- **Detalhes dos projetos:** nome, número de frames, quantidade de traços, FPS, material de palco e data da última alteração.
+- **Autosave e migração:** projetos gravados em ficheiros individuais; os dados da versão antiga são migrados automaticamente na primeira abertura.
+- **Oito pincéis:** tinta, lápis, marcador, aerógrafo, giz de cera, marca-texto, pastel e pixel.
+- **Entrada por toque ou caneta digital:** modo combinado, apenas dedo ou apenas stylus, quando o dispositivo comunica corretamente o tipo de ponteiro.
+- **Ferramentas de desenho:** borracha, linha, régua com marcas, retângulo e elipse.
+- **Materiais de palco:** papel branco, grelha, creme, azul técnico e fundo noturno.
+- **Estúdio horizontal imersivo:** a área de desenho fica no centro, com ferramentas e cores nas laterais.
+- **Transformação do palco:** zoom, deslocamento e rotação por gestos de dois dedos.
+- **Animação:** timeline, criar/duplicar/apagar frames, onion skin, reprodução e velocidade de 1 a 30 FPS.
+- **Efeitos:** espelhamento horizontal, inversão vertical, monocromático e limpeza do frame.
+- **Exportação de imagem:** PNG e JPEG em alta resolução.
+- **Exportação de animação:** MP4/H.264, GIF e sequência de frames PNG num ZIP.
+- **Compilação verificável:** GitHub Actions compila o APK e verifica a estrutura e assinatura do pacote.
 
-## Como descarregar e instalar o APK
+## Descarregar a pré-versão
 
-1. Abre **Actions** neste repositório e escolhe a execução **Android APK** que terminou com sucesso.
-2. Em **Artifacts**, descarrega `drawmotion-android-apk`. O download deste artefacto é um ZIP.
-3. **Extrai o ZIP primeiro.** Dentro dele encontrarás `app-debug.apk`. Instala esse ficheiro APK — não tentes instalar o ZIP.
-4. O Android poderá pedir que autorizes a instalação de aplicações a partir da aplicação utilizada para abrir o ficheiro.
+1. Abre a secção [Releases](https://github.com/nexauren1/Draw-motion/releases).
+2. Escolhe **Drawmotion v0.2.0-preview.1** e descarrega o ficheiro `Drawmotion-v0.2.0-preview.1-android.apk`.
+3. Abre o APK no Android e autoriza a instalação a partir dessa origem, caso o sistema o solicite.
 
-O app agora suporta Android 6.0 (API 23) ou mais recente. Se continuar a aparecer “Ocorreu um erro ao analisar o pacote”, confirma que extraíste o APK e que o ficheiro termina em `.apk`, não `.zip`. A compilação verifica também a assinatura e a estrutura do APK.
+O APK gerado pelo workflow é assinado com a chave de debug e serve para testes. Não é uma build de produção assinada para distribuição comercial.
+
+Também podes abrir [GitHub Actions](https://github.com/nexauren1/Draw-motion/actions), escolher uma execução **Android APK** bem-sucedida e descarregar o artefacto `drawmotion-android-apk`. Esse download é um ZIP; extrai-o para encontrar o APK.
 
 ## Compilar localmente
 
 Requisitos: JDK 17, Android SDK Platform 35 e Gradle 8.9.
 
-    gradle assembleDebug
+```bash
+gradle --no-daemon assembleDebug
+```
 
-O APK é criado em:
+Ficheiro gerado:
 
-    app/build/outputs/apk/debug/app-debug.apk
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
 
-## Próximas etapas
+## Processo de publicação
 
-A base ainda precisa de testes em dispositivos reais e de mais funcionalidades: camadas independentes, seleção e transformação de objetos, importação de imagens, suporte avançado à pressão da caneta, exportação de animação para GIF/MP4, áudio e recuperação de projetos. Essas funções não devem ser consideradas concluídas até serem implementadas e verificadas.
+O workflow `.github/workflows/android-build.yml` compila a aplicação em alterações relevantes. Ao publicar um tag `v*`, cria uma GitHub Release e anexa o APK; tags que incluem `preview` são marcadas como pré-lançamentos.
+
+Antes de promover para versão estável, é necessário validar em hardware real: toque e caneta digital, criação/abertura de vários projetos, autosave e recuperação, além de reproduzir os MP4 exportados em diferentes dispositivos. A codificação MP4 depende do codificador H.264 disponível no Android.
 
 ## Identificação técnica
 
-- Pacote Android: `com.nexauren.drawmotion`
-- Linguagem: Kotlin
-- UI e desenho: Jetpack Compose
-- Versão: `0.1.1`
-- `minSdk`: 23
-- `targetSdk`: 34
+- **Application ID:** `com.nexauren.drawmotion`
+- **Linguagem:** Kotlin
+- **UI e desenho:** Jetpack Compose
+- **Versão:** `0.2.0-preview.1`
+- **versionCode:** `6`
+- **minSdk:** 23 (Android 6.0 ou superior)
+- **targetSdk:** 34
+- **compileSdk:** 35
+
+## Próximas melhorias
+
+Camadas independentes, seleção e transformação de objetos, importação de imagens, controlo de pressão da caneta, áudio, testes automatizados de interface e assinatura de produção protegida por secrets do CI.
