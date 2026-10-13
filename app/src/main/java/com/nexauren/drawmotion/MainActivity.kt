@@ -2703,18 +2703,49 @@ private fun EffectOption(title: String, description: String, onClick: () -> Unit
     }
 }
 
+private fun projectDirectory(context: Context): File =
+    File(context.filesDir, "projects").apply { mkdirs() }
+
+private fun safeProjectSlug(name: String): String {
+    val normalized = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .lowercase(Locale.ROOT)
+    return normalized.replace(Regex("[^a-z0-9_-]+"), "-")
+        .trim('-')
+        .take(48)
+        .ifBlank { "projeto" }
+}
+
+private fun projectFile(context: Context, name: String): File {
+    val normalized = name.trim().lowercase(Locale.ROOT)
+    val hash = Integer.toHexString(normalized.hashCode())
+    return File(projectDirectory(context), "${safeProjectSlug(name)}-$hash.drawmotion")
+}
+
+private fun generateUniqueProjectName(existingNames: List<String>, preferredName: String): String {
+    val existing = existingNames.map { it.trim().lowercase(Locale.ROOT) }.toSet()
+    if (preferredName.trim().lowercase(Locale.ROOT) !in existing) return preferredName
+    var suffix = 2
+    while ((preferredName + " " + suffix).lowercase(Locale.ROOT) in existing) suffix++
+    return preferredName + " " + suffix
+}
+
 private fun saveProject(
     context: Context,
     frames: List<AnimationFrame>,
     currentFrameIndex: Int,
     fps: Int,
-    material: CanvasMaterial = CanvasMaterial.GRID
+    material: CanvasMaterial = CanvasMaterial.GRID,
+    projectName: String = "Animação recente"
 ): Boolean {
     return try {
+        val cleanName = projectName.trim().ifBlank { "Animação recente" }
         val root = JSONObject()
-            .put("formatVersion", 2)
-            .put("currentFrame", currentFrameIndex)
-            .put("fps", fps)
+            .put("formatVersion", 3)
+            .put("name", cleanName)
+            .put("updatedAt", System.currentTimeMillis())
+            .put("currentFrame", currentFrameIndex.coerceIn(0, (frames.size - 1).coerceAtLeast(0)))
+            .put("fps", fps.coerceIn(1, 30))
             .put("material", material.name)
         val frameArray = JSONArray()
         frames.forEach { frame ->
@@ -2737,20 +2768,19 @@ private fun saveProject(
             frameArray.put(frameObject)
         }
         root.put("frames", frameArray)
-        context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
-            .edit().putString("project-json", root.toString()).commit()
+        projectFile(context, cleanName).writeText(root.toString())
+        true
     } catch (_: Exception) {
         false
     }
 }
 
-private fun loadProject(context: Context): SavedProject? {
+private fun decodeProject(data: String, fallbackName: String = "Animação recente"): SavedProject? {
     return try {
-        val data = context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
-            .getString("project-json", null) ?: return null
         val root = JSONObject(data)
-        val material = runCatching { CanvasMaterial.valueOf(root.optString("material", CanvasMaterial.GRID.name)) }
-            .getOrDefault(CanvasMaterial.GRID)
+        val material = runCatching {
+            CanvasMaterial.valueOf(root.optString("material", CanvasMaterial.GRID.name))
+        }.getOrDefault(CanvasMaterial.GRID)
         val frameArray = root.getJSONArray("frames")
         val loadedFrames = mutableListOf<AnimationFrame>()
         for (i in 0 until frameArray.length()) {
@@ -2762,13 +2792,19 @@ private fun loadProject(context: Context): SavedProject? {
                 val tool = runCatching {
                     DrawingTool.valueOf(strokeObject.optString("tool", DrawingTool.BRUSH.name))
                 }.getOrDefault(DrawingTool.BRUSH)
-                val brush = runCatching { BrushPreset.valueOf(strokeObject.optString("brush", BrushPreset.INK.name)) }
-                    .getOrDefault(BrushPreset.INK)
+                val brush = runCatching {
+                    BrushPreset.valueOf(strokeObject.optString("brush", BrushPreset.INK.name))
+                }.getOrDefault(BrushPreset.INK)
                 val pointsArray = strokeObject.optJSONArray("points") ?: JSONArray()
                 val points = mutableListOf<Offset>()
                 for (k in 0 until pointsArray.length()) {
                     val point = pointsArray.getJSONObject(k)
-                    points.add(Offset(point.optDouble("x", 0.0).toFloat(), point.optDouble("y", 0.0).toFloat()))
+                    points.add(
+                        Offset(
+                            point.optDouble("x", 0.0).toFloat(),
+                            point.optDouble("y", 0.0).toFloat()
+                        )
+                    )
                 }
                 frame.strokes.add(
                     InkStroke(
@@ -2787,12 +2823,81 @@ private fun loadProject(context: Context): SavedProject? {
             frames = loadedFrames,
             currentFrame = root.optInt("currentFrame", 0),
             fps = root.optInt("fps", 12),
-            material = material
+            material = material,
+            projectName = root.optString("name", fallbackName).ifBlank { fallbackName }
         )
     } catch (_: Exception) {
         null
     }
 }
+
+private fun loadProject(context: Context, name: String? = null): SavedProject? {
+    return try {
+        val directory = projectDirectory(context)
+        val file = if (name != null) {
+            projectFile(context, name).takeIf { it.isFile }
+        } else {
+            directory.listFiles()
+                ?.filter { it.isFile && it.extension == "drawmotion" }
+                ?.maxByOrNull { it.lastModified() }
+        }
+        if (file != null) return decodeProject(file.readText(), name ?: file.nameWithoutExtension)
+        if (name != null) return null
+
+        // Migra automaticamente o autosave único usado pelas versões anteriores.
+        val legacyData = context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
+            .getString("project-json", null) ?: return null
+        val migrated = decodeProject(legacyData, "Animação recente") ?: return null
+        if (saveProject(
+                context,
+                migrated.frames,
+                migrated.currentFrame,
+                migrated.fps,
+                migrated.material,
+                migrated.projectName
+            )
+        ) {
+            context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
+                .edit().remove("project-json").apply()
+        }
+        migrated
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun listProjectInfos(context: Context): List<ProjectInfo> {
+    val files = projectDirectory(context).listFiles()
+        ?.filter { it.isFile && it.extension == "drawmotion" }
+        .orEmpty()
+    return files.mapNotNull { file ->
+        runCatching {
+            val root = JSONObject(file.readText())
+            val frames = root.optJSONArray("frames") ?: JSONArray()
+            var strokeCount = 0
+            for (i in 0 until frames.length()) {
+                strokeCount += frames.optJSONObject(i)?.optJSONArray("strokes")?.length() ?: 0
+            }
+            val material = runCatching {
+                CanvasMaterial.valueOf(root.optString("material", CanvasMaterial.GRID.name))
+            }.getOrDefault(CanvasMaterial.GRID)
+            ProjectInfo(
+                name = root.optString("name", file.nameWithoutExtension),
+                frameCount = frames.length(),
+                strokeCount = strokeCount,
+                fps = root.optInt("fps", 12),
+                material = material,
+                updatedAt = root.optLong("updatedAt", file.lastModified())
+            )
+        }.getOrNull()
+    }.sortedByDescending { it.updatedAt }
+}
+
+private fun deleteProjectFile(context: Context, name: String): Boolean =
+    projectFile(context, name).delete()
+
+private fun formatProjectTimestamp(timestamp: Long): String =
+    java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(java.util.Date(timestamp))
 
 private fun renderFrameBitmap(
     frame: AnimationFrame,
