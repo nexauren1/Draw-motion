@@ -11,7 +11,14 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Paint as AndroidPaint
 import android.graphics.Path as AndroidPath
 import android.graphics.RectF
+import android.media.Image
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.net.Uri
+import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.util.Locale
@@ -58,6 +65,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -86,6 +94,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -127,8 +136,15 @@ private enum class DrawingTool(val label: String, val symbol: String) {
     BRUSH("Pincéis", "✎"),
     ERASER("Borracha", "⌫"),
     LINE("Linha", "／"),
+    RULER("Régua", "▤"),
     RECTANGLE("Retângulo", "□"),
     ELLIPSE("Elipse", "◯")
+}
+
+private enum class DrawingInputMode(val label: String) {
+    BOTH("Dedo + caneta"),
+    TOUCH("Só dedo"),
+    STYLUS("Só caneta")
 }
 
 private enum class BrushPreset(
@@ -210,7 +226,17 @@ private data class SavedProject(
     val frames: List<AnimationFrame>,
     val currentFrame: Int,
     val fps: Int,
-    val material: CanvasMaterial = CanvasMaterial.GRID
+    val material: CanvasMaterial = CanvasMaterial.GRID,
+    val projectName: String = "Animação recente"
+)
+
+private data class ProjectInfo(
+    val name: String,
+    val frameCount: Int,
+    val strokeCount: Int,
+    val fps: Int,
+    val material: CanvasMaterial,
+    val updatedAt: Long
 )
 
 private fun demoStroke(
