@@ -1,6 +1,8 @@
 package com.nexauren.drawmotion
 
+import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Color as AndroidColor
@@ -10,6 +12,7 @@ import android.graphics.RectF
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,6 +76,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -141,13 +146,21 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun DrawmotionApp() {
     val context = LocalContext.current
+    val activity = context.findActivity()
+    val settingsPrefs = remember { context.getSharedPreferences("drawmotion-settings", Context.MODE_PRIVATE) }
+    var page by remember { mutableStateOf(AppPage.HOME) }
+    var projectName by remember { mutableStateOf("Animação recente") }
+    var defaultFps by remember { mutableIntStateOf(settingsPrefs.getInt("default-fps", 12).coerceIn(1, 30)) }
+    var defaultOnionSkin by remember { mutableStateOf(settingsPrefs.getBoolean("default-onion-skin", true)) }
+    var immersiveEditor by remember { mutableStateOf(settingsPrefs.getBoolean("immersive-editor", true)) }
+
     val frames = remember { mutableStateListOf(AnimationFrame(1)) }
     var currentFrameIndex by remember { mutableIntStateOf(0) }
-    var fps by remember { mutableIntStateOf(12) }
+    var fps by remember { mutableIntStateOf(defaultFps) }
     var selectedTool by remember { mutableStateOf(DrawingTool.BRUSH) }
     var brushColor by remember { mutableIntStateOf(Color(0xFF272A35).toArgb()) }
     var brushSize by remember { mutableStateOf(8f) }
-    var onionSkin by remember { mutableStateOf(true) }
+    var onionSkin by remember { mutableStateOf(defaultOnionSkin) }
     var zoom by remember { mutableStateOf(1f) }
     var rotation by remember { mutableStateOf(0f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
@@ -159,6 +172,29 @@ private fun DrawmotionApp() {
     val redoStack = remember { mutableStateListOf<List<InkStroke>>() }
 
     val activeFrame = frames.getOrNull(currentFrameIndex) ?: frames.first()
+
+    LaunchedEffect(page, immersiveEditor) {
+        if (activity != null) {
+            activity.requestedOrientation = if (page == AppPage.EDITOR) {
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            val bars = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+            if (page == AppPage.EDITOR && immersiveEditor) {
+                bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                bars.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                bars.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    BackHandler(enabled = page != AppPage.HOME) {
+        isPlaying = false
+        showEffects = false
+        page = AppPage.HOME
+    }
 
     LaunchedEffect(Unit) {
         val loaded = loadProject(context)
@@ -256,70 +292,100 @@ private fun DrawmotionApp() {
         notice = if (ok) "Projeto guardado neste dispositivo" else "Falha ao guardar o projeto"
     }
 
+    val startNewProject: () -> Unit = {
+        frames.clear()
+        frames.add(AnimationFrame(1))
+        currentFrameIndex = 0
+        fps = defaultFps
+        selectedTool = DrawingTool.BRUSH
+        brushColor = Color(0xFF272A35).toArgb()
+        brushSize = 8f
+        onionSkin = defaultOnionSkin
+        zoom = 1f
+        rotation = 0f
+        pan = Offset.Zero
+        undoStack.clear()
+        redoStack.clear()
+        isPlaying = false
+        projectName = "Nova animação"
+        revision++
+        notice = "Novo projeto iniciado"
+        page = AppPage.EDITOR
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = AppBackground) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            HeaderBar(
+        when (page) {
+            AppPage.HOME -> HomeScreen(
+                onContinue = { page = AppPage.EDITOR },
+                onNewProject = startNewProject,
+                onProjects = { page = AppPage.PROJECTS },
+                onSettings = { page = AppPage.SETTINGS },
+                onAbout = { page = AppPage.ABOUT }
+            )
+            AppPage.PROJECTS -> ProjectsScreen(
+                frameCount = frames.size,
+                onBack = { page = AppPage.HOME },
+                onOpen = { page = AppPage.EDITOR },
+                onNewProject = startNewProject
+            )
+            AppPage.SETTINGS -> SettingsScreen(
+                defaultFps = defaultFps,
+                onionSkin = defaultOnionSkin,
+                immersiveEditor = immersiveEditor,
+                onBack = { page = AppPage.HOME },
+                onDefaultFpsChange = {
+                    defaultFps = it.coerceIn(1, 30)
+                    settingsPrefs.edit().putInt("default-fps", defaultFps).apply()
+                },
+                onOnionSkinChange = {
+                    defaultOnionSkin = it
+                    settingsPrefs.edit().putBoolean("default-onion-skin", it).apply()
+                },
+                onImmersiveEditorChange = {
+                    immersiveEditor = it
+                    settingsPrefs.edit().putBoolean("immersive-editor", it).apply()
+                }
+            )
+            AppPage.ABOUT -> AboutScreen(onBack = { page = AppPage.HOME })
+            AppPage.EDITOR -> EditorScreen(
+                projectName = projectName,
                 notice = notice,
-                onSave = saveAction,
-                onExport = {
-                    exportLauncher.launch("drawmotion-frame-" + (currentFrameIndex + 1) + ".png")
-                }
-            )
-
-            ToolSelector(selectedTool = selectedTool, onSelect = { selectedTool = it })
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                StageCanvas(
-                    modifier = Modifier.fillMaxWidth(),
-                    frames = frames,
-                    currentFrameIndex = currentFrameIndex,
-                    tool = selectedTool,
-                    brushColor = brushColor,
-                    brushSize = brushSize,
-                    onionSkin = onionSkin,
-                    zoom = zoom,
-                    rotation = rotation,
-                    pan = pan,
-                    revision = revision,
-                    onCommit = commitStroke,
-                    onZoomChange = { zoom = it },
-                    onRotationChange = { rotation = it },
-                    onPanChange = { pan = it }
-                )
-            }
-
-            ViewportControls(
-                zoom = zoom,
-                rotation = rotation,
-                brushSize = brushSize,
-                onZoomChange = { zoom = it.coerceIn(0.35f, 5f) },
-                onRotationChange = { rotation = it },
-                onBrushSizeChange = { brushSize = it },
-                onReset = {
-                    zoom = 1f
-                    rotation = 0f
-                    pan = Offset.Zero
-                }
-            )
-
-            ColorPalette(selectedColor = brushColor, onSelect = { brushColor = it })
-
-            TimelinePanel(
                 frames = frames,
                 currentFrameIndex = currentFrameIndex,
                 fps = fps,
-                onSelectFrame = {
+                selectedTool = selectedTool,
+                brushColor = brushColor,
+                brushSize = brushSize,
+                onionSkin = onionSkin,
+                zoom = zoom,
+                rotation = rotation,
+                pan = pan,
+                revision = revision,
+                isPlaying = isPlaying,
+                canUndo = undoStack.isNotEmpty(),
+                canRedo = redoStack.isNotEmpty(),
+                onHome = {
+                    isPlaying = false
+                    saveProject(context, frames, currentFrameIndex, fps)
+                    page = AppPage.HOME
+                },
+                onToolSelected = { selectedTool = it },
+                onColorSelected = { brushColor = it },
+                onBrushSizeChange = { brushSize = it },
+                onZoomChange = { zoom = it.coerceIn(0.35f, 5f) },
+                onRotationChange = { rotation = it },
+                onResetViewport = {
+                    zoom = 1f
+                    rotation = 0f
+                    pan = Offset.Zero
+                },
+                onSave = saveAction,
+                onExport = {
+                    exportLauncher.launch("drawmotion-frame-" + (currentFrameIndex + 1) + ".png")
+                },
+                onCommit = commitStroke,
+                onPanChange = { pan = it },
+                onFrameSelected = {
                     currentFrameIndex = it
                     undoStack.clear()
                     redoStack.clear()
@@ -340,27 +406,12 @@ private fun DrawmotionApp() {
                         notice = "Frame removido"
                     }
                 },
-                onFpsChange = { fps = it.coerceIn(1, 30) }
-            )
-
-            BottomControls(
-                playing = isPlaying,
-                onionSkin = onionSkin,
-                canUndo = undoStack.isNotEmpty(),
-                canRedo = redoStack.isNotEmpty(),
+                onFpsChange = { fps = it.coerceIn(1, 30) },
                 onPlay = { isPlaying = !isPlaying },
                 onOnionSkin = { onionSkin = !onionSkin },
                 onUndo = undoAction,
                 onRedo = redoAction,
                 onEffects = { showEffects = true }
-            )
-
-            Text(
-                text = "Dica: desenha com um dedo. Usa dois dedos para mover, rodar e ampliar o palco.",
-                color = TextMuted,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-                modifier = Modifier.padding(bottom = 8.dp)
             )
         }
     }
@@ -417,6 +468,548 @@ private fun DrawmotionApp() {
                 }
             }
         )
+    }
+}
+
+private enum class AppPage { HOME, PROJECTS, SETTINGS, ABOUT, EDITOR }
+
+private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+    while (current is android.content.ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return current as? Activity
+}
+
+@Composable
+private fun HomeScreen(
+    onContinue: () -> Unit,
+    onNewProject: () -> Unit,
+    onProjects: () -> Unit,
+    onSettings: () -> Unit,
+    onAbout: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("D", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
+            }
+            Column {
+                Text("Drawmotion", color = TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                Text("O teu estúdio de animação 2D", color = TextMuted, fontSize = 12.sp)
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = PanelBackground),
+            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(19.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("DESENHA • ANIMA • REPRODUZ", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("Dá vida aos teus desenhos.", color = TextPrimary, fontSize = 26.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Entra no estúdio horizontal, usa uma área de desenho maior e organiza os frames numa timeline.",
+                    color = TextMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+                Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+                    Text("Continuar animação")
+                }
+                OutlinedButton(onClick = onNewProject, modifier = Modifier.fillMaxWidth()) {
+                    Text("＋  Novo projeto")
+                }
+            }
+        }
+
+        Text("O TEU ESPAÇO", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HomeNavigationTile(
+                modifier = Modifier.weight(1f),
+                symbol = "▤",
+                title = "Projetos",
+                description = "Abrir o rascunho local",
+                onClick = onProjects
+            )
+            HomeNavigationTile(
+                modifier = Modifier.weight(1f),
+                symbol = "⚙",
+                title = "Definições",
+                description = "Ajustar o estúdio",
+                onClick = onSettings
+            )
+        }
+        HomeNavigationTile(
+            modifier = Modifier.fillMaxWidth(),
+            symbol = "ⓘ",
+            title = "Sobre o Drawmotion",
+            description = "Funções disponíveis e próximas melhorias",
+            onClick = onAbout
+        )
+        Text(
+            "Os desenhos são guardados localmente neste dispositivo.",
+            color = TextMuted,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun HomeNavigationTile(
+    modifier: Modifier = Modifier,
+    symbol: String,
+    title: String,
+    description: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = PanelBackground)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Text(symbol, color = Accent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(description, color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun PageHeader(title: String, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        OutlinedButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)) {
+            Text("← Voltar")
+        }
+        Text(title, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ProjectsScreen(
+    frameCount: Int,
+    onBack: () -> Unit,
+    onOpen: () -> Unit,
+    onNewProject: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        PageHeader("Projetos", onBack)
+        Text("PROJETO NESTE DISPOSITIVO", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = PanelBackground)
+        ) {
+            Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Animação local", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("$frameCount frames • Guardado automaticamente", color = TextMuted, fontSize = 12.sp)
+                Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+                    Text("Abrir no estúdio")
+                }
+            }
+        }
+        OutlinedButton(onClick = onNewProject, modifier = Modifier.fillMaxWidth()) {
+            Text("＋  Começar um novo projeto")
+        }
+        Text(
+            "Esta versão mantém um rascunho local ativo. A biblioteca de vários projetos é uma melhoria futura.",
+            color = TextMuted,
+            fontSize = 12.sp,
+            lineHeight = 18.sp
+        )
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    defaultFps: Int,
+    onionSkin: Boolean,
+    immersiveEditor: Boolean,
+    onBack: () -> Unit,
+    onDefaultFpsChange: (Int) -> Unit,
+    onOnionSkinChange: (Boolean) -> Unit,
+    onImmersiveEditorChange: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        PageHeader("Definições", onBack)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = PanelBackground)
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Velocidade inicial da animação", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                Text("$defaultFps FPS", color = Accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Slider(
+                    value = defaultFps.toFloat(),
+                    onValueChange = { onDefaultFpsChange(it.roundToInt()) },
+                    valueRange = 1f..30f,
+                    steps = 28
+                )
+                Text("Aplica-se aos novos projetos. Podes mudar os FPS no editor.", color = TextMuted, fontSize = 11.sp)
+            }
+        }
+        SettingsOption(
+            title = "Onion skin por defeito",
+            description = "Mostra os frames vizinhos ao desenhar.",
+            enabled = onionSkin,
+            onToggle = { onOnionSkinChange(!onionSkin) }
+        )
+        SettingsOption(
+            title = "Editor imersivo",
+            description = "Esconde a barra do sistema durante o desenho; desliza a partir da borda para a mostrar.",
+            enabled = immersiveEditor,
+            onToggle = { onImmersiveEditorChange(!immersiveEditor) }
+        )
+        Text(
+            "O editor abre sempre na horizontal para dar mais espaço à tela de desenho.",
+            color = TextMuted,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+        )
+    }
+}
+
+@Composable
+private fun SettingsOption(
+    title: String,
+    description: String,
+    enabled: Boolean,
+    onToggle: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = PanelBackground)
+    ) {
+        Row(
+            modifier = Modifier.padding(15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(description, color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+            Text(
+                if (enabled) "Ligado" else "Desligado",
+                color = if (enabled) Accent else TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutScreen(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        PageHeader("Sobre o Drawmotion", onBack)
+        Text("UM ESTÚDIO 2D PARA ANDROID", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "O Drawmotion é um editor nativo para desenhar frame a frame, com ferramentas simples e uma área de trabalho horizontal.",
+            color = TextPrimary,
+            fontSize = 16.sp,
+            lineHeight = 23.sp
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = PanelBackground)
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text("Já disponível", color = TextPrimary, fontWeight = FontWeight.Bold)
+                Text("• Pincel, borracha, linha, retângulo e elipse", color = TextMuted, fontSize = 12.sp)
+                Text("• Frames, duplicação e remoção", color = TextMuted, fontSize = 12.sp)
+                Text("• Onion skin e pré-visualização", color = TextMuted, fontSize = 12.sp)
+                Text("• Desfazer/refazer e autosave local", color = TextMuted, fontSize = 12.sp)
+                Text("• Exportação do frame atual para PNG", color = TextMuted, fontSize = 12.sp)
+            }
+        }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = PanelBackground)
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Próximas melhorias", color = TextPrimary, fontWeight = FontWeight.Bold)
+                Text("Biblioteca com vários projetos, camadas independentes, importação de imagens, áudio e exportação de animações para GIF/MP4.", color = TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditorScreen(
+    projectName: String,
+    notice: String,
+    frames: List<AnimationFrame>,
+    currentFrameIndex: Int,
+    fps: Int,
+    selectedTool: DrawingTool,
+    brushColor: Int,
+    brushSize: Float,
+    onionSkin: Boolean,
+    zoom: Float,
+    rotation: Float,
+    pan: Offset,
+    revision: Int,
+    isPlaying: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onHome: () -> Unit,
+    onToolSelected: (DrawingTool) -> Unit,
+    onColorSelected: (Int) -> Unit,
+    onBrushSizeChange: (Float) -> Unit,
+    onZoomChange: (Float) -> Unit,
+    onRotationChange: (Float) -> Unit,
+    onResetViewport: () -> Unit,
+    onSave: () -> Unit,
+    onExport: () -> Unit,
+    onCommit: (InkStroke) -> Unit,
+    onPanChange: (Offset) -> Unit,
+    onFrameSelected: (Int) -> Unit,
+    onAddFrame: () -> Unit,
+    onDuplicateFrame: () -> Unit,
+    onDeleteFrame: () -> Unit,
+    onFpsChange: (Int) -> Unit,
+    onPlay: () -> Unit,
+    onOnionSkin: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onEffects: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 7.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Column(
+            modifier = Modifier.width(59.dp).fillMaxHeight(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            RailButton("⌂", "Início", onClick = onHome)
+            DrawingTool.values().forEach { tool ->
+                RailButton(
+                    symbol = tool.symbol,
+                    label = when (tool) {
+                        DrawingTool.BRUSH -> "Pincel"
+                        DrawingTool.ERASER -> "Apagar"
+                        DrawingTool.LINE -> "Linha"
+                        DrawingTool.RECTANGLE -> "Rect."
+                        DrawingTool.ELLIPSE -> "Elipse"
+                    },
+                    selected = selectedTool == tool,
+                    onClick = { onToolSelected(tool) }
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            RailButton("↶", "Desfazer", enabled = canUndo, onClick = onUndo)
+            RailButton("↷", "Refazer", enabled = canRedo, onClick = onRedo)
+        }
+
+        Column(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(32.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Column(modifier = Modifier.width(92.dp)) {
+                    Text(projectName, color = TextPrimary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (notice.isNotBlank()) notice else "Frame " + (currentFrameIndex + 1) + "/" + frames.size,
+                        color = if (notice.isNotBlank()) Accent else TextMuted,
+                        fontSize = 8.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                TinyActionButton("−", onClick = { onZoomChange(zoom - 0.15f) })
+                Text((zoom * 100f).roundToInt().toString() + "%", color = TextPrimary, fontSize = 9.sp)
+                TinyActionButton("+", onClick = { onZoomChange(zoom + 0.15f) })
+                TinyActionButton("↶", onClick = { onRotationChange(rotation - 15f) })
+                TinyActionButton("↷", onClick = { onRotationChange(rotation + 15f) })
+                TinyActionButton("⟲", onClick = onResetViewport)
+                Slider(
+                    value = brushSize,
+                    onValueChange = onBrushSizeChange,
+                    valueRange = 2f..28f,
+                    modifier = Modifier.width(82.dp).height(26.dp)
+                )
+                TinyActionButton("Guardar", onClick = onSave)
+                TinyActionButton("PNG", onClick = onExport)
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF090B10)),
+                contentAlignment = Alignment.Center
+            ) {
+                StageCanvas(
+                    modifier = Modifier,
+                    frames = frames,
+                    currentFrameIndex = currentFrameIndex,
+                    tool = selectedTool,
+                    brushColor = brushColor,
+                    brushSize = brushSize,
+                    onionSkin = onionSkin,
+                    zoom = zoom,
+                    rotation = rotation,
+                    pan = pan,
+                    revision = revision,
+                    onCommit = onCommit,
+                    onZoomChange = onZoomChange,
+                    onRotationChange = onRotationChange,
+                    onPanChange = onPanChange
+                )
+            }
+
+            TimelinePanel(
+                frames = frames,
+                currentFrameIndex = currentFrameIndex,
+                fps = fps,
+                onSelectFrame = onFrameSelected,
+                onAddFrame = onAddFrame,
+                onDuplicateFrame = onDuplicateFrame,
+                onDeleteFrame = onDeleteFrame,
+                onFpsChange = onFpsChange
+            )
+        }
+
+        Column(
+            modifier = Modifier.width(58.dp).fillMaxHeight(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text("CORES", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            EditorColorGrid(selectedColor = brushColor, onSelect = onColorSelected)
+            Spacer(Modifier.weight(1f))
+            RailButton(if (isPlaying) "Ⅱ" else "▶", if (isPlaying) "Pausa" else "Reproduzir", onClick = onPlay)
+            RailButton(if (onionSkin) "◉" else "○", "Onion", selected = onionSkin, onClick = onOnionSkin)
+            RailButton("✦", "Efeitos", onClick = onEffects)
+        }
+    }
+}
+
+@Composable
+private fun RailButton(
+    symbol: String,
+    label: String,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                when {
+                    !enabled -> Color(0xFF171A22)
+                    selected -> Color(0xFF332E56)
+                    else -> Color(0xFF1C202B)
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(symbol, color = if (selected) Color(0xFFC7BDFF) else if (enabled) TextPrimary else TextMuted, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = if (enabled) TextMuted else Color(0xFF636A7A), fontSize = 7.sp, maxLines = 1, overflow = TextOverflow.Clip)
+    }
+}
+
+@Composable
+private fun TinyActionButton(
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    Box(
+        modifier = Modifier
+            .height(27.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (enabled) Color(0xFF262A37) else Color(0xFF181B23))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (enabled) TextPrimary else TextMuted, fontSize = 9.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun EditorColorGrid(selectedColor: Int, onSelect: (Int) -> Unit) {
+    val colors = listOf(
+        0xFF272A35.toInt(),
+        0xFFEF476F.toInt(),
+        0xFFFF8A3D.toInt(),
+        0xFFFFD166.toInt(),
+        0xFF06D6A0.toInt(),
+        0xFF21A0F6.toInt(),
+        0xFF8D7CFF.toInt(),
+        0xFFFFFFFF.toInt()
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        colors.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                pair.forEach { colorInt ->
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color(colorInt))
+                            .border(
+                                width = if (selectedColor == colorInt) 2.dp else 1.dp,
+                                color = if (selectedColor == colorInt) Accent else Color(0xFF4A4F60),
+                                shape = CircleShape
+                            )
+                            .clickable { onSelect(colorInt) }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -860,21 +1453,26 @@ private fun TimelinePanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(13.dp))
+            .clip(RoundedCornerShape(11.dp))
             .background(PanelBackground)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 7.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("TIMELINE", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth().height(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("TIMELINE", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(7.dp))
+            Text(frames.size.toString() + " frames", color = TextMuted, fontSize = 8.sp)
             Spacer(Modifier.weight(1f))
-            CompactTextButton("−", onClick = { onFpsChange(fps - 1) })
-            Text(fps.toString() + " FPS", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            CompactTextButton("+", onClick = { onFpsChange(fps + 1) })
+            TinyActionButton("−", onClick = { onFpsChange(fps - 1) })
+            Text(fps.toString() + " FPS", color = TextPrimary, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+            TinyActionButton("+", onClick = { onFpsChange(fps + 1) })
         }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             frames.forEachIndexed { index, frame ->
                 FrameTile(
@@ -886,31 +1484,26 @@ private fun TimelinePanel(
             }
             Box(
                 modifier = Modifier
-                    .size(width = 62.dp, height = 59.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .border(1.dp, PanelBorder, RoundedCornerShape(10.dp))
+                    .size(width = 54.dp, height = 48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, PanelBorder, RoundedCornerShape(8.dp))
                     .background(Color(0xFF20232E))
                     .clickable(onClick = onAddFrame),
                 contentAlignment = Alignment.Center
             ) {
-                Text("+", color = Accent, fontSize = 25.sp)
+                Text("+", color = Accent, fontSize = 22.sp)
             }
         }
         Row(
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier.fillMaxWidth().height(25.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedButton(onClick = onAddFrame, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp)) {
-                Text("+ Frame", fontSize = 10.sp, maxLines = 1)
-            }
-            OutlinedButton(onClick = onDuplicateFrame, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp)) {
-                Text("Duplicar", fontSize = 10.sp, maxLines = 1)
-            }
-            OutlinedButton(onClick = onDeleteFrame, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp)) {
-                Text("Apagar", fontSize = 10.sp, maxLines = 1)
-            }
+            TinyActionButton("+ Novo", onClick = onAddFrame)
+            TinyActionButton("Duplicar", onClick = onDuplicateFrame)
+            TinyActionButton("Apagar", onClick = onDeleteFrame)
             Spacer(Modifier.weight(1f))
-            Text("  " + (currentFrameIndex + 1) + "/" + frames.size, color = TextMuted, fontSize = 10.sp)
+            Text((currentFrameIndex + 1).toString() + "/" + frames.size, color = TextMuted, fontSize = 8.sp)
         }
     }
 }
@@ -919,7 +1512,7 @@ private fun TimelinePanel(
 private fun FrameTile(number: Int, selected: Boolean, strokeCount: Int, onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            .size(width = 62.dp, height = 59.dp)
+            .size(width = 54.dp, height = 48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (selected) Color(0xFF332E56) else Color(0xFF222631))
             .border(
@@ -928,13 +1521,13 @@ private fun FrameTile(number: Int, selected: Boolean, strokeCount: Int, onClick:
                 shape = RoundedCornerShape(10.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 7.dp, vertical = 5.dp),
+            .padding(horizontal = 5.dp, vertical = 3.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(number.toString().padStart(2, '0'), color = if (selected) Color(0xFFC7BDFF) else TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(number.toString().padStart(2, '0'), color = if (selected) Color(0xFFC7BDFF) else TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(5.dp).clip(CircleShape).background(if (strokeCount > 0) Color(0xFF67DDB5) else TextMuted))
-            Text("  " + strokeCount + " traços", color = TextMuted, fontSize = 8.sp, maxLines = 1)
+            Text(" " + strokeCount, color = TextMuted, fontSize = 7.sp, maxLines = 1)
         }
     }
 }
