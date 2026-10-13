@@ -1724,44 +1724,116 @@ private fun writeBitmapToYuvImage(bitmap: Bitmap, image: Image) {
     }
 }
 
-private fun renderFramePng(frame: AnimationFrame): Bitmap {
-    val bitmap = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+private fun renderFramePng(frame: AnimationFrame): Bitmap =
+    renderFrameBitmap(frame, 1920, 1080)
+
+private fun renderFrameBitmap(frame: AnimationFrame, width: Int, height: Int): Bitmap {
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bitmap)
     canvas.drawColor(AndroidColor.WHITE)
-    canvas.scale(2f, 2f)
+    canvas.save()
+    canvas.scale(width / BOARD_WIDTH, height / BOARD_HEIGHT)
 
     frame.strokes.forEach { stroke ->
         if (stroke.points.isEmpty()) return@forEach
-        val color = if (stroke.tool == DrawingTool.ERASER) AndroidColor.WHITE else stroke.color
+        val baseColor = if (stroke.tool == DrawingTool.ERASER) AndroidColor.WHITE else stroke.color
+        val alphaFactor = when (stroke.tool) {
+            DrawingTool.MARKER -> 0.72f
+            DrawingTool.HIGHLIGHTER -> 0.30f
+            DrawingTool.AIRBRUSH -> 0.20f
+            else -> 1f
+        }
+        val widthFactor = when (stroke.tool) {
+            DrawingTool.PENCIL -> 0.62f
+            DrawingTool.PEN -> 0.8f
+            DrawingTool.MARKER -> 1.45f
+            DrawingTool.HIGHLIGHTER -> 2.1f
+            DrawingTool.AIRBRUSH -> 1.9f
+            DrawingTool.CALLIGRAPHY -> 1.2f
+            else -> 1f
+        }
+        val color = AndroidColor.argb(
+            (AndroidColor.alpha(baseColor) * alphaFactor).roundToInt().coerceIn(0, 255),
+            AndroidColor.red(baseColor),
+            AndroidColor.green(baseColor),
+            AndroidColor.blue(baseColor)
+        )
+        val lineWidth = (stroke.width * widthFactor).coerceAtLeast(1f)
         val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
             this.color = color
-            strokeWidth = stroke.width.coerceAtLeast(1f)
+            strokeWidth = lineWidth
             strokeCap = AndroidPaint.Cap.ROUND
             strokeJoin = AndroidPaint.Join.ROUND
-            style = if (stroke.tool == DrawingTool.RECTANGLE) AndroidPaint.Style.STROKE else AndroidPaint.Style.STROKE
+            style = AndroidPaint.Style.STROKE
         }
         val first = stroke.points.first()
         val last = stroke.points.last()
+
         when (stroke.tool) {
             DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
                 if (stroke.points.size == 1) {
-                    canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
+                    paint.style = AndroidPaint.Style.FILL
+                    canvas.drawCircle(first.x, first.y, lineWidth / 2f, paint)
                 } else {
-                    val rect = RectF(min(first.x, last.x), min(first.y, last.y), max(first.x, last.x), max(first.y, last.y))
-                    if (stroke.tool == DrawingTool.RECTANGLE) canvas.drawRect(rect, paint) else canvas.drawOval(rect, paint)
+                    val rect = RectF(
+                        min(first.x, last.x),
+                        min(first.y, last.y),
+                        max(first.x, last.x),
+                        max(first.y, last.y)
+                    )
+                    if (stroke.tool == DrawingTool.RECTANGLE) {
+                        canvas.drawRect(rect, paint)
+                    } else {
+                        canvas.drawOval(rect, paint)
+                    }
                 }
             }
-            DrawingTool.LINE -> {
-                if (stroke.points.size == 1) {
-                    canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
-                } else {
-                    canvas.drawLine(first.x, first.y, last.x, last.y, paint)
-                }
-            }
-            DrawingTool.BRUSH, DrawingTool.ERASER -> {
+            DrawingTool.LINE, DrawingTool.RULER -> {
                 if (stroke.points.size == 1) {
                     paint.style = AndroidPaint.Style.FILL
-                    canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
+                    canvas.drawCircle(first.x, first.y, lineWidth / 2f, paint)
+                } else {
+                    canvas.drawLine(first.x, first.y, last.x, last.y, paint)
+                    if (stroke.tool == DrawingTool.RULER) {
+                        val dx = last.x - first.x
+                        val dy = last.y - first.y
+                        val length = hypot(dx, dy)
+                        if (length > 1f) {
+                            val normalX = -dy / length
+                            val normalY = dx / length
+                            for (tick in 1..20) {
+                                val x = first.x + dx * (tick / 21f)
+                                val y = first.y + dy * (tick / 21f)
+                                val tickSize = if (tick % 5 == 0) 8f else 4f
+                                canvas.drawLine(
+                                    x - normalX * tickSize,
+                                    y - normalY * tickSize,
+                                    x + normalX * tickSize,
+                                    y + normalY * tickSize,
+                                    paint
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            DrawingTool.AIRBRUSH -> {
+                val haze = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                    this.color = color
+                    style = AndroidPaint.Style.FILL
+                }
+                stroke.points.forEach { point ->
+                    haze.alpha = (AndroidColor.alpha(color) * 0.42f).roundToInt()
+                    canvas.drawCircle(point.x, point.y, lineWidth * 1.25f, haze)
+                    haze.alpha = (AndroidColor.alpha(color) * 0.28f).roundToInt()
+                    canvas.drawCircle(point.x, point.y, lineWidth * 2.2f, haze)
+                }
+            }
+            DrawingTool.PEN, DrawingTool.BRUSH, DrawingTool.PENCIL, DrawingTool.MARKER,
+            DrawingTool.HIGHLIGHTER, DrawingTool.CALLIGRAPHY, DrawingTool.ERASER -> {
+                if (stroke.points.size == 1) {
+                    paint.style = AndroidPaint.Style.FILL
+                    canvas.drawCircle(first.x, first.y, lineWidth / 2f, paint)
                 } else {
                     val path = AndroidPath().apply {
                         moveTo(first.x, first.y)
@@ -1772,5 +1844,7 @@ private fun renderFramePng(frame: AnimationFrame): Bitmap {
             }
         }
     }
+
+    canvas.restore()
     return bitmap
 }
