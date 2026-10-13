@@ -3051,6 +3051,203 @@ private fun renderFrameBitmap(
     return bitmap
 }
 
+private fun exportAnimationMp4(
+    context: Context,
+    frames: List<AnimationFrame>,
+    fps: Int,
+    material: CanvasMaterial,
+    destination: Uri
+): Boolean {
+    require(frames.isNotEmpty()) { "Não existem frames para exportar" }
+    val width = 960
+    val height = 540
+    val safeFps = fps.coerceIn(1, 30)
+    val outputFile = File(context.cacheDir, "drawmotion-${System.currentTimeMillis()}.mp4")
+    var codec: MediaCodec? = null
+    var muxer: MediaMuxer? = null
+    var codecStarted = false
+    var muxerStarted = false
+
+    try {
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        codec = encoder
+        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+            setInteger(MediaFormat.KEY_BIT_RATE, 3_000_000)
+            setInteger(MediaFormat.KEY_FRAME_RATE, safeFps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        }
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+        codecStarted = true
+
+        val videoMuxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        muxer = videoMuxer
+        val bufferInfo = MediaCodec.BufferInfo()
+        var trackIndex = -1
+        var outputDone = false
+
+        fun drainEncoder(waitForOutput: Boolean) {
+            while (true) {
+                val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, if (waitForOutput) 10_000L else 0L)
+                when {
+                    outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> return
+                    outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        if (muxerStarted) throw IllegalStateException("O formato de vídeo mudou mais de uma vez")
+                        trackIndex = videoMuxer.addTrack(encoder.outputFormat)
+                        videoMuxer.start()
+                        muxerStarted = true
+                    }
+                    outputIndex >= 0 -> {
+                        val outputBuffer = encoder.getOutputBuffer(outputIndex)
+                        if (
+                            outputBuffer != null &&
+                            bufferInfo.size > 0 &&
+                            (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
+                        ) {
+                            if (!muxerStarted || trackIndex < 0) {
+                                throw IllegalStateException("A faixa MP4 ainda não está pronta")
+                            }
+                            outputBuffer.position(bufferInfo.offset)
+                            outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                            videoMuxer.writeSampleData(trackIndex, outputBuffer, bufferInfo)
+                        }
+                        val reachedEnd = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                        encoder.releaseOutputBuffer(outputIndex, false)
+                        if (reachedEnd) {
+                            outputDone = true
+                            return
+                        }
+                    }
+                    else -> return
+                }
+            }
+        }
+
+        frames.forEachIndexed { index, frame ->
+            var inputIndex = encoder.dequeueInputBuffer(10_000L)
+            var retries = 0
+            while (inputIndex < 0 && retries < 30) {
+                drainEncoder(false)
+                inputIndex = encoder.dequeueInputBuffer(10_000L)
+                retries++
+            }
+            if (inputIndex < 0) throw IllegalStateException("Sem buffer de entrada para codificar o frame")
+
+            val inputImage = encoder.getInputImage(inputIndex)
+                ?: throw IllegalStateException("O codificador não fornece um buffer YUV para entrada")
+            val bitmap = renderFrameBitmap(frame, width, height, material)
+            try {
+                writeBitmapToYuvImage(bitmap, inputImage)
+            } finally {
+                inputImage.close()
+                bitmap.recycle()
+            }
+            val presentationTimeUs = index * 1_000_000L / safeFps
+            encoder.queueInputBuffer(
+                inputIndex,
+                0,
+                width * height * 3 / 2,
+                presentationTimeUs,
+                0
+            )
+            drainEncoder(false)
+        }
+
+        var eosInputIndex = encoder.dequeueInputBuffer(10_000L)
+        var eosRetries = 0
+        while (eosInputIndex < 0 && eosRetries < 30) {
+            drainEncoder(false)
+            eosInputIndex = encoder.dequeueInputBuffer(10_000L)
+            eosRetries++
+        }
+        if (eosInputIndex < 0) throw IllegalStateException("Não foi possível terminar a exportação")
+
+        encoder.queueInputBuffer(
+            eosInputIndex,
+            0,
+            0,
+            frames.size * 1_000_000L / safeFps,
+            MediaCodec.BUFFER_FLAG_END_OF_STREAM
+        )
+        while (!outputDone) drainEncoder(true)
+
+        if (muxerStarted) {
+            videoMuxer.stop()
+            muxerStarted = false
+        }
+        if (!outputFile.isFile || outputFile.length() == 0L) return false
+
+        val output = context.contentResolver.openOutputStream(destination) ?: return false
+        output.use { stream ->
+            FileInputStream(outputFile).use { input -> input.copyTo(stream) }
+        }
+        return true
+    } catch (_: Exception) {
+        return false
+    } finally {
+        if (codecStarted) runCatching { codec?.stop() }
+        runCatching { codec?.release() }
+        if (muxerStarted) runCatching { muxer?.stop() }
+        runCatching { muxer?.release() }
+        outputFile.delete()
+    }
+}
+
+private fun writeBitmapToYuvImage(bitmap: Bitmap, image: Image) {
+    require(bitmap.width == image.width && bitmap.height == image.height) {
+        "O bitmap e a imagem de vídeo têm dimensões diferentes"
+    }
+    val width = bitmap.width
+    val height = bitmap.height
+    val pixels = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    val planes = image.planes
+    require(planes.size >= 3) { "O codificador não disponibilizou três planos YUV" }
+    val yPlane = planes[0]
+    val uPlane = planes[1]
+    val vPlane = planes[2]
+
+    fun writeSample(plane: Image.Plane, x: Int, y: Int, value: Int) {
+        val index = y * plane.rowStride + x * plane.pixelStride
+        plane.buffer.put(index, value.coerceIn(0, 255).toByte())
+    }
+
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            val color = pixels[y * width + x]
+            val red = AndroidColor.red(color)
+            val green = AndroidColor.green(color)
+            val blue = AndroidColor.blue(color)
+            val luminance = ((66 * red + 129 * green + 25 * blue + 128) shr 8) + 16
+            writeSample(yPlane, x, y, luminance)
+        }
+    }
+
+    for (y in 0 until height step 2) {
+        for (x in 0 until width step 2) {
+            var red = 0
+            var green = 0
+            var blue = 0
+            for (dy in 0..1) {
+                for (dx in 0..1) {
+                    val color = pixels[(y + dy) * width + x + dx]
+                    red += AndroidColor.red(color)
+                    green += AndroidColor.green(color)
+                    blue += AndroidColor.blue(color)
+                }
+            }
+            red /= 4
+            green /= 4
+            blue /= 4
+            val u = ((-38 * red - 74 * green + 112 * blue + 128) shr 8) + 128
+            val v = ((112 * red - 94 * green - 18 * blue + 128) shr 8) + 128
+            writeSample(uPlane, x / 2, y / 2, u)
+            writeSample(vPlane, x / 2, y / 2, v)
+        }
+    }
+}
+
 private fun exportAnimatedGif(
     output: OutputStream,
     frames: List<AnimationFrame>,
