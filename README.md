@@ -49,6 +49,6 @@ A base ainda precisa de testes em dispositivos reais e de mais funcionalidades: 
 - Pacote Android: `com.nexauren.drawmotion`
 - Linguagem: Kotlin
 - UI e desenho: Jetpack Compose
-- Versão: `0.1.1`
+- Versão: `0.1.2`
 - `minSdk`: 23
 - `targetSdk`: 34
