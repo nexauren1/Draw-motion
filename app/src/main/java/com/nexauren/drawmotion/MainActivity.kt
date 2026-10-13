@@ -444,6 +444,8 @@ private fun DrawmotionApp() {
     var selectedBrush by remember { mutableStateOf(BrushPreset.INK) }
     var canvasMaterial by remember { mutableStateOf(CanvasMaterial.GRID) }
     var projectName by remember { mutableStateOf("Animação recente") }
+    var inputMode by remember { mutableStateOf(DrawingInputMode.BOTH) }
+    var projectCatalog = remember { mutableStateListOf<ProjectInfo>() }
     var defaultFps by remember { mutableIntStateOf(settingsPrefs.getInt("default-fps", 12).coerceIn(1, 30)) }
     var defaultOnionSkin by remember { mutableStateOf(settingsPrefs.getBoolean("default-onion-skin", true)) }
     var immersiveEditor by remember { mutableStateOf(settingsPrefs.getBoolean("immersive-editor", true)) }
@@ -468,6 +470,10 @@ private fun DrawmotionApp() {
     var notice by remember { mutableStateOf("") }
     val undoStack = remember { mutableStateListOf<List<InkStroke>>() }
     val redoStack = remember { mutableStateListOf<List<InkStroke>>() }
+    val refreshProjectCatalog: () -> Unit = {
+        projectCatalog.clear()
+        projectCatalog.addAll(listProjectInfos(context))
+    }
 
     val activeFrame = frames.getOrNull(currentFrameIndex) ?: frames.first()
 
@@ -505,9 +511,15 @@ private fun DrawmotionApp() {
             currentFrameIndex = loaded.currentFrame.coerceIn(0, frames.lastIndex)
             fps = loaded.fps.coerceIn(1, 30)
             canvasMaterial = loaded.material
+            projectName = loaded.projectName
             revision++
             notice = "Projeto local carregado"
         }
+        refreshProjectCatalog()
+    }
+
+    LaunchedEffect(page, revision, projectName) {
+        if (page == AppPage.PROJECTS) refreshProjectCatalog()
     }
 
     LaunchedEffect(isPlaying, fps, frames.size) {
@@ -518,10 +530,10 @@ private fun DrawmotionApp() {
     }
 
     // Autosave after edits, but never serialize every frame while preview playback is running.
-    LaunchedEffect(revision, fps, frames.size, currentFrameIndex, isPlaying) {
+    LaunchedEffect(revision, fps, frames.size, currentFrameIndex, isPlaying, projectName, canvasMaterial) {
         if (!isPlaying) {
             delay(650)
-            saveProject(context, frames, currentFrameIndex, fps, canvasMaterial)
+            saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
         }
     }
 
@@ -638,6 +650,25 @@ private fun DrawmotionApp() {
         }
     }
 
+    val mp4ExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("video/mp4")
+    ) { uri: Uri? ->
+        val frameSnapshot = frames.map { AnimationFrame(it.number, it.strokes.toMutableList()) }
+        val fpsSnapshot = fps
+        val materialSnapshot = canvasMaterial
+        if (uri != null && frameSnapshot.isNotEmpty()) {
+            isPlaying = false
+            exportScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching {
+                        exportAnimationMp4(context, frameSnapshot, fpsSnapshot, materialSnapshot, uri)
+                    }.getOrDefault(false)
+                }
+                notice = if (ok) "Animação exportada em MP4" else "Falha ao exportar MP4; verifica o suporte de vídeo do dispositivo"
+            }
+        }
+    }
+
     val commitStroke: (InkStroke) -> Unit = { stroke ->
         val target = frames[currentFrameIndex]
         undoStack.add(target.strokes.toList())
@@ -679,31 +710,82 @@ private fun DrawmotionApp() {
     }
 
     val saveAction: () -> Unit = {
-        val ok = saveProject(context, frames, currentFrameIndex, fps, canvasMaterial)
+        val ok = saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
+        refreshProjectCatalog()
         notice = if (ok) "Projeto guardado neste dispositivo" else "Falha ao guardar o projeto"
     }
 
+    val createNamedProject: (String) -> Unit = { requestedName ->
+        val name = requestedName.trim()
+        if (name.isNotBlank()) {
+            saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
+            frames.clear()
+            frames.add(AnimationFrame(1))
+            currentFrameIndex = 0
+            fps = defaultFps
+            selectedTool = DrawingTool.BRUSH
+            selectedBrush = BrushPreset.INK
+            canvasMaterial = CanvasMaterial.GRID
+            brushColor = Color(0xFF272A35).toArgb()
+            brushSize = 8f
+            onionSkin = defaultOnionSkin
+            zoom = 1f
+            rotation = 0f
+            pan = Offset.Zero
+            undoStack.clear()
+            redoStack.clear()
+            isPlaying = false
+            projectName = name
+            revision++
+            saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
+            refreshProjectCatalog()
+            notice = "Novo projeto criado"
+            page = AppPage.EDITOR
+        }
+    }
+
+    val saveAsProject: (String) -> Unit = { requestedName ->
+        val name = requestedName.trim()
+        if (name.isNotBlank()) {
+            val saved = saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, name)
+            if (saved) {
+                projectName = name
+                revision++
+                refreshProjectCatalog()
+                notice = "Cópia guardada como $name"
+                page = AppPage.EDITOR
+            } else {
+                notice = "Falha ao guardar a cópia"
+            }
+        }
+    }
+
+    val openNamedProject: (String) -> Unit = { name ->
+        val loaded = loadProject(context, name)
+        if (loaded != null && loaded.frames.isNotEmpty()) {
+            frames.clear()
+            frames.addAll(loaded.frames)
+            currentFrameIndex = loaded.currentFrame.coerceIn(0, frames.lastIndex)
+            fps = loaded.fps.coerceIn(1, 30)
+            canvasMaterial = loaded.material
+            projectName = loaded.projectName
+            selectedTool = DrawingTool.BRUSH
+            selectedBrush = BrushPreset.INK
+            undoStack.clear()
+            redoStack.clear()
+            isPlaying = false
+            revision++
+            notice = "Projeto aberto: $name"
+            page = AppPage.EDITOR
+        } else {
+            notice = "Não foi possível abrir este projeto"
+        }
+    }
+
     val startNewProject: () -> Unit = {
-        frames.clear()
-        frames.add(AnimationFrame(1))
-        currentFrameIndex = 0
-        fps = defaultFps
-        selectedTool = DrawingTool.BRUSH
-        selectedBrush = BrushPreset.INK
-        canvasMaterial = CanvasMaterial.GRID
-        brushColor = Color(0xFF272A35).toArgb()
-        brushSize = 8f
-        onionSkin = defaultOnionSkin
-        zoom = 1f
-        rotation = 0f
-        pan = Offset.Zero
-        undoStack.clear()
-        redoStack.clear()
-        isPlaying = false
-        projectName = "Nova animação"
-        revision++
-        notice = "Novo projeto iniciado"
-        page = AppPage.EDITOR
+        val existing = listProjectInfos(context).map { it.name }
+        val name = generateUniqueProjectName(existing, "Nova animação")
+        createNamedProject(name)
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = AppBackground) {
@@ -717,11 +799,22 @@ private fun DrawmotionApp() {
                 onAbout = { page = AppPage.ABOUT }
             )
             AppPage.PROJECTS -> ProjectsScreen(
-                frameCount = frames.size,
+                projects = projectCatalog.toList(),
+                currentProjectName = projectName,
                 onBack = { page = AppPage.HOME },
-                onOpen = { page = AppPage.EDITOR },
+                onOpenProject = openNamedProject,
                 onTemplates = { page = AppPage.TEMPLATES },
-                onNewProject = startNewProject
+                onNewProject = createNamedProject,
+                onSaveAs = saveAsProject,
+                onDeleteProject = { name ->
+                    if (name.equals(projectName, ignoreCase = true)) {
+                        notice = "Guarda ou abre outro projeto antes de eliminar este"
+                    } else {
+                        deleteProjectFile(context, name)
+                        refreshProjectCatalog()
+                        notice = "Projeto eliminado"
+                    }
+                }
             )
             AppPage.TEMPLATES -> TemplatesScreen(
                 onBack = { page = AppPage.HOME },
@@ -792,7 +885,8 @@ private fun DrawmotionApp() {
                 canRedo = redoStack.isNotEmpty(),
                 onHome = {
                     isPlaying = false
-                    saveProject(context, frames, currentFrameIndex, fps, canvasMaterial)
+                    saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
+                    refreshProjectCatalog()
                     page = AppPage.HOME
                 },
                 onToolSelected = { selectedTool = it },
@@ -811,6 +905,8 @@ private fun DrawmotionApp() {
                 },
                 onSave = saveAction,
                 onShowExport = { showExportDialog = true },
+                inputMode = inputMode,
+                onInputModeChange = { inputMode = it },
                 onCommit = commitStroke,
                 onPanChange = { pan = it },
                 onFrameSelected = {
@@ -934,6 +1030,10 @@ private fun DrawmotionApp() {
                     ExportOption("Sequência PNG — ZIP", "Um PNG por frame e um ficheiro com o FPS") {
                         showExportDialog = false
                         pngSequenceExportLauncher.launch("drawmotion-frames.zip")
+                    }
+                    ExportOption("MP4 — animação completa", "Vídeo H.264 com o FPS do projeto") {
+                        showExportDialog = false
+                        mp4ExportLauncher.launch("drawmotion-${safeProjectSlug(projectName)}.mp4")
                     }
                 }
             },
