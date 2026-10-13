@@ -513,7 +513,12 @@ private fun DrawmotionApp() {
 }
 
 @Composable
-private fun HeaderBar(notice: String, onSave: () -> Unit, onExport: () -> Unit) {
+private fun HeaderBar(
+    projectName: String,
+    notice: String,
+    onSave: () -> Unit,
+    onProjects: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -531,24 +536,81 @@ private fun HeaderBar(notice: String, onSave: () -> Unit, onExport: () -> Unit) 
         Column(modifier = Modifier.weight(1f)) {
             Text("Drawmotion", color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
             Text(
-                text = if (notice.isNotEmpty()) notice else "ESTÚDIO DE ANIMAÇÃO 2D",
+                text = if (notice.isNotEmpty()) notice else projectName,
                 color = if (notice.isNotEmpty()) Color(0xFFBBAFFF) else TextMuted,
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
+        OutlinedButton(
+            onClick = onProjects,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+        ) { Text("Projetos", fontSize = 10.sp, maxLines = 1) }
         FilledTonalButton(
             onClick = onSave,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
-        ) {
-            Text("Guardar", fontSize = 11.sp)
-        }
+            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 8.dp)
+        ) { Text("Guardar", fontSize = 10.sp, maxLines = 1) }
+    }
+}
+
+@Composable
+private fun ExportPanel(
+    isExporting: Boolean,
+    onExportPng: () -> Unit,
+    onExportVideo: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        OutlinedButton(
+            onClick = onExportPng,
+            modifier = Modifier.weight(1f),
+            enabled = !isExporting
+        ) { Text("Exportar frame · PNG", fontSize = 11.sp) }
         Button(
-            onClick = onExport,
-            contentPadding = PaddingValues(horizontal = 11.dp, vertical = 8.dp)
+            onClick = onExportVideo,
+            modifier = Modifier.weight(1f),
+            enabled = !isExporting
         ) {
-            Text("PNG", fontSize = 11.sp)
+            Text(if (isExporting) "A exportar…" else "Exportar vídeo · MP4", fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun InputModeSelector(
+    selected: InputMode,
+    showGrid: Boolean,
+    onSelect: (InputMode) -> Unit,
+    onGridToggle: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PanelBackground)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("CONTROLO DE ENTRADA", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            InputMode.values().forEach { mode ->
+                FilterChip(
+                    selected = selected == mode,
+                    onClick = { onSelect(mode) },
+                    label = { Text(mode.label, fontSize = 10.sp) }
+                )
+            }
+            FilterChip(
+                selected = showGrid,
+                onClick = onGridToggle,
+                label = { Text("Grelha", fontSize = 10.sp) }
+            )
         }
     }
 }
@@ -556,7 +618,7 @@ private fun HeaderBar(notice: String, onSave: () -> Unit, onExport: () -> Unit) 
 @Composable
 private fun ToolSelector(selectedTool: DrawingTool, onSelect: (DrawingTool) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text("FERRAMENTAS", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+        Text("PINCÉIS E FORMAS", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 10.sp)
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(7.dp)
@@ -579,6 +641,8 @@ private fun StageCanvas(
     frames: List<AnimationFrame>,
     currentFrameIndex: Int,
     tool: DrawingTool,
+    inputMode: InputMode,
+    showGrid: Boolean,
     brushColor: Int,
     brushSize: Float,
     onionSkin: Boolean,
@@ -598,6 +662,7 @@ private fun StageCanvas(
     val latestColor = rememberUpdatedState(brushColor)
     val latestWidth = rememberUpdatedState(brushSize)
     val latestTool = rememberUpdatedState(tool)
+    val latestInputMode = rememberUpdatedState(inputMode)
     val latestOnCommit = rememberUpdatedState(onCommit)
     val latestZoomChange = rememberUpdatedState(onZoomChange)
     val latestRotationChange = rememberUpdatedState(onRotationChange)
@@ -613,9 +678,18 @@ private fun StageCanvas(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val startTool = latestTool.value
                     val points = mutableListOf<Offset>()
-                    points.add(pointerToBoard(down.position, size, latestZoom.value, latestRotation.value, latestPan.value))
-                    var drawing = true
-                    previewState.value = InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool)
+                    val drawAllowed = when (latestInputMode.value) {
+                        InputMode.BOTH -> true
+                        InputMode.TOUCH -> down.type == PointerType.Touch
+                        InputMode.STYLUS -> down.type == PointerType.Stylus
+                    }
+                    if (drawAllowed) {
+                        points.add(pointerToBoard(down.position, size, latestZoom.value, latestRotation.value, latestPan.value))
+                    }
+                    var drawing = drawAllowed
+                    previewState.value = if (drawing) {
+                        InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool)
+                    } else null
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -692,21 +766,23 @@ private fun StageCanvas(
         withTransform({
             scale(size.width / BOARD_WIDTH, size.height / BOARD_HEIGHT, pivot = Offset.Zero)
         }) {
-            for (x in 0..960 step 48) {
-                drawLine(
-                    color = Color(0xFFEDEFF4),
-                    start = Offset(x.toFloat(), 0f),
-                    end = Offset(x.toFloat(), BOARD_HEIGHT),
-                    strokeWidth = 1f
-                )
-            }
-            for (y in 0..540 step 48) {
-                drawLine(
-                    color = Color(0xFFEDEFF4),
-                    start = Offset(0f, y.toFloat()),
-                    end = Offset(BOARD_WIDTH, y.toFloat()),
-                    strokeWidth = 1f
-                )
+            if (showGrid) {
+                for (x in 0..960 step 48) {
+                    drawLine(
+                        color = Color(0xFFEDEFF4),
+                        start = Offset(x.toFloat(), 0f),
+                        end = Offset(x.toFloat(), BOARD_HEIGHT),
+                        strokeWidth = 1f
+                    )
+                }
+                for (y in 0..540 step 48) {
+                    drawLine(
+                        color = Color(0xFFEDEFF4),
+                        start = Offset(0f, y.toFloat()),
+                        end = Offset(BOARD_WIDTH, y.toFloat()),
+                        strokeWidth = 1f
+                    )
+                }
             }
 
             withTransform({
@@ -768,18 +844,51 @@ private fun DrawScope.drawInkStroke(
     overrideColor: Color? = null
 ) {
     if (stroke.points.isEmpty()) return
-    val inkColor = overrideColor ?: if (stroke.tool == DrawingTool.ERASER) Color.White else Color(stroke.color)
-    val finalColor = inkColor.copy(alpha = inkColor.alpha * opacity)
-    val width = stroke.width.coerceAtLeast(1f)
+    val sourceColor = overrideColor ?: if (stroke.tool == DrawingTool.ERASER) Color.White else Color(stroke.color)
+    val alphaFactor = when (stroke.tool) {
+        DrawingTool.MARKER -> 0.72f
+        DrawingTool.HIGHLIGHTER -> 0.30f
+        DrawingTool.AIRBRUSH -> 0.20f
+        else -> 1f
+    }
+    val widthFactor = when (stroke.tool) {
+        DrawingTool.PENCIL -> 0.62f
+        DrawingTool.PEN -> 0.8f
+        DrawingTool.MARKER -> 1.45f
+        DrawingTool.HIGHLIGHTER -> 2.1f
+        DrawingTool.AIRBRUSH -> 1.9f
+        DrawingTool.CALLIGRAPHY -> 1.2f
+        else -> 1f
+    }
+    val finalColor = sourceColor.copy(alpha = sourceColor.alpha * opacity * alphaFactor)
+    val width = (stroke.width * widthFactor).coerceAtLeast(1f)
     val first = stroke.points.first()
     val last = stroke.points.last()
 
     when (stroke.tool) {
-        DrawingTool.LINE -> {
+        DrawingTool.LINE, DrawingTool.RULER -> {
             if (stroke.points.size == 1) {
                 drawCircle(finalColor, radius = width / 2f, center = first)
             } else {
                 drawLine(finalColor, first, last, strokeWidth = width, cap = StrokeCap.Round)
+                if (stroke.tool == DrawingTool.RULER) {
+                    val dx = last.x - first.x
+                    val dy = last.y - first.y
+                    val length = hypot(dx, dy)
+                    if (length > 1f) {
+                        val normal = Offset(-dy / length, dx / length)
+                        for (tick in 1..20) {
+                            val point = first + (last - first) * (tick / 21f)
+                            val tickSize = if (tick % 5 == 0) 8f else 4f
+                            drawLine(
+                                finalColor,
+                                point - normal * tickSize,
+                                point + normal * tickSize,
+                                strokeWidth = (width * 0.65f).coerceAtLeast(0.7f)
+                            )
+                        }
+                    }
+                }
             }
         }
         DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
@@ -808,7 +917,14 @@ private fun DrawScope.drawInkStroke(
                 }
             }
         }
-        DrawingTool.BRUSH, DrawingTool.ERASER -> {
+        DrawingTool.AIRBRUSH -> {
+            stroke.points.forEach { point ->
+                drawCircle(finalColor.copy(alpha = finalColor.alpha * 0.42f), radius = width * 1.25f, center = point)
+                drawCircle(finalColor.copy(alpha = finalColor.alpha * 0.28f), radius = width * 2.2f, center = point)
+            }
+        }
+        DrawingTool.PEN, DrawingTool.BRUSH, DrawingTool.PENCIL, DrawingTool.MARKER,
+        DrawingTool.HIGHLIGHTER, DrawingTool.CALLIGRAPHY, DrawingTool.ERASER -> {
             if (stroke.points.size == 1) {
                 drawCircle(finalColor, radius = width / 2f, center = first)
             } else {
@@ -826,6 +942,7 @@ private fun DrawScope.drawInkStroke(
     }
 }
 
+@Composable
 @Composable
 private fun ViewportControls(
     zoom: Float,
