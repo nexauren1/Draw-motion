@@ -9,6 +9,7 @@ import android.graphics.Path as AndroidPath
 import android.graphics.RectF
 import android.media.Image
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
@@ -1120,7 +1121,6 @@ private fun DrawScope.drawInkStroke(
 }
 
 @Composable
-@Composable
 private fun ViewportControls(
     zoom: Float,
     rotation: Float,
@@ -1561,7 +1561,7 @@ private fun exportAnimationMp4(
         val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
         codec = encoder
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfoColorFormats.FLEXIBLE_YUV420)
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
             setInteger(MediaFormat.KEY_BIT_RATE, 3_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, safeFps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
@@ -1668,10 +1668,6 @@ private fun exportAnimationMp4(
         runCatching { muxer?.release() }
         outputFile.delete()
     }
-}
-
-private object MediaCodecInfoColorFormats {
-    const val FLEXIBLE_YUV420 = 0x7F420888
 }
 
 private fun writeBitmapToYuvImage(bitmap: Bitmap, image: Image) {
