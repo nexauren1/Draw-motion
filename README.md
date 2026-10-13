@@ -10,6 +10,8 @@ A app é estática e não precisa de servidor próprio. Quando o workflow de Git
 
 **https://nexauren1.github.io/Draw-motion/**
 
+Acompanhar o lançamento e a lista de testes: [Issue #1 — ativar Pages e validar o editor](https://github.com/nexauren1/Draw-motion/issues/1).
+
 Se a página ainda não abrir, consulta o separador **Actions** no repositório e confirma se o workflow **Deploy Drawmotion Studio to GitHub Pages** terminou. A primeira publicação pode exigir alguns segundos/minutos e a ativação de Pages nas definições do repositório.
 
 Para testar localmente, abre o ficheiro **index.html** num navegador moderno. A instalação PWA e o modo offline requerem um contexto HTTPS ou localhost.
