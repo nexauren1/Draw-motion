@@ -13,6 +13,9 @@
 - Palco 16:9 com zoom, deslocamento e rotação por gestos de dois dedos, além de controlos manuais.
 - Timeline compacta com criação, duplicação e remoção de frames.
 - Definições persistentes para FPS inicial, onion skin e ecrã imersivo.
+- Biblioteca visual de oito pincéis: tinta, lápis, marcador, aerógrafo, giz de cera, marca-texto, pastel e pixel.
+- Materiais de palco selecionáveis: papel branco, papel quadriculado, creme, azul técnico e fundo noturno.
+- Galeria de três modelos animados com pré-visualização em movimento: Bola cósmica, Sol de verão e Flor a florescer.
 - Onion skin para visualizar frames adjacentes.
 - Pré-visualização e velocidade ajustável entre 1 e 30 FPS.
 - Desfazer/refazer; mudanças de gestos para dois dedos não devem deixar marcas acidentais.
@@ -20,6 +23,7 @@
 - Autosave local automático e botão para guardar imediatamente.
 - Exportação do frame atual para PNG (1920 × 1080) e JPEG.
 - Exportação da animação completa para GIF e de todos os frames como sequência PNG dentro de um ZIP.
+- Os estilos de pincel e o material do palco são guardados no projeto e aplicados na exportação.
 - Workflow GitHub Actions para compilar e verificar a estrutura e assinatura do APK.
 
 ## Como descarregar e instalar o APK
@@ -50,6 +54,6 @@ A base ainda precisa de testes em dispositivos reais e de mais funcionalidades: 
 - Pacote Android: `com.nexauren.drawmotion`
 - Linguagem: Kotlin
 - UI e desenho: Jetpack Compose
-- Versão: `0.1.3`
+- Versão: `0.1.4`
 - `minSdk`: 23
 - `targetSdk`: 34
