@@ -977,6 +977,175 @@ private fun ProjectsScreen(
 }
 
 @Composable
+private fun TemplatesScreen(
+    onBack: () -> Unit,
+    onOpenTemplate: (DemoProject) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        PageHeader("Animações prontas", onBack)
+        Text("MODELOS EM MOVIMENTO", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Cada cartão é uma animação real composta por frames. Vê a pré-visualização a mexer e abre o modelo no editor para explorar, modificar e exportar.",
+            color = TextMuted,
+            fontSize = 12.sp,
+            lineHeight = 18.sp
+        )
+        DemoProject.values().forEach { demo ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = PanelBackground)
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    DemoPreview(demo, Modifier.fillMaxWidth().height(132.dp))
+                    Text(demo.title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(demo.description, color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp)
+                    Text(
+                        demo.frameCount.toString() + " frames  •  " + demo.fps + " FPS  •  " + demo.material.title,
+                        color = Accent,
+                        fontSize = 9.sp
+                    )
+                    Button(
+                        onClick = { onOpenTemplate(demo) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Usar modelo e reproduzir  ▶")
+                    }
+                }
+            }
+        }
+        Text(
+            "Os modelos são criados localmente e funcionam sem descarregar vídeos da internet.",
+            color = TextMuted,
+            fontSize = 10.sp
+        )
+    }
+}
+
+@Composable
+private fun DemoPreview(demo: DemoProject, modifier: Modifier = Modifier) {
+    var previewFrame by remember(demo) { mutableIntStateOf(0) }
+    LaunchedEffect(demo) {
+        while (true) {
+            delay((1000L / demo.fps.coerceAtLeast(1)).coerceAtLeast(40L))
+            previewFrame = (previewFrame + 1) % demo.frameCount
+        }
+    }
+    Canvas(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(demo.material.backgroundColor))
+    ) {
+        drawRect(Color(demo.material.backgroundColor), size = size)
+        withTransform({
+            scale(size.width / BOARD_WIDTH, size.height / BOARD_HEIGHT, pivot = Offset.Zero)
+        }) {
+            demo.material.gridColor?.let { grid ->
+                for (x in 0..960 step 48) {
+                    drawLine(Color(grid), Offset(x.toFloat(), 0f), Offset(x.toFloat(), BOARD_HEIGHT), 1f)
+                }
+                for (y in 0..540 step 48) {
+                    drawLine(Color(grid), Offset(0f, y.toFloat()), Offset(BOARD_WIDTH, y.toFloat()), 1f)
+                }
+            }
+            val phase = previewFrame.toFloat() / demo.frameCount * 6.283185f
+            when (demo) {
+                DemoProject.COSMIC_BOUNCE -> {
+                    for (n in 0..34) {
+                        val x = ((n * 149 + 37) % 930 + 15).toFloat()
+                        val y = ((n * 83 + 19) % 500 + 15).toFloat()
+                        drawCircle(
+                            color = if (n % 3 == 0) Color(0xFFFFD166) else Color(0xFFBBAFFF),
+                            radius = if (n % 5 == 0) 3.5f else 2f,
+                            center = Offset(x, y)
+                        )
+                    }
+                    drawLine(Color(0xFF525978), Offset(20f, 445f), Offset(940f, 445f), 3f)
+                    val x = 95f + previewFrame * 69f
+                    val y = 328f - abs(sin((phase * 1.5f).toDouble()).toFloat()) * 128f
+                    for (tail in 4 downTo 1) {
+                        drawCircle(
+                            color = Color(0xFF8D7CFF).copy(alpha = 0.08f * (5 - tail)),
+                            radius = 9f + tail * 5f,
+                            center = Offset(x - tail * 22f, y + tail * 4f)
+                        )
+                    }
+                    drawOval(
+                        color = Color(0xFF8D7CFF).copy(alpha = 0.55f),
+                        topLeft = Offset(x - 54f, y - 17f),
+                        size = Size(108f, 34f),
+                        style = Stroke(width = 3f)
+                    )
+                    drawCircle(Color(0xFF21A0F6), 36f, Offset(x, y))
+                    drawCircle(Color(0xFF8D7CFF), 26f, Offset(x + 3f, y + 2f))
+                    drawCircle(Color(0xFFFF7DA7), 15f, Offset(x + 7f, y + 3f))
+                    drawCircle(Color.White, 7f, Offset(x - 10f, y - 11f))
+                }
+                DemoProject.SUNSET -> {
+                    val sunX = 480f + sin(phase.toDouble()).toFloat() * 36f
+                    val sunY = 222f + sin((phase * 1.3f).toDouble()).toFloat() * 18f
+                    drawCircle(Color(0xFFFF9B54).copy(alpha = 0.17f), 82f, Offset(sunX, sunY))
+                    drawCircle(Color(0xFFFF9B54), 61f, Offset(sunX, sunY))
+                    drawCircle(Color(0xFFFFD166), 48f, Offset(sunX, sunY + 2f))
+                    drawCircle(Color(0xFFFFF0B8), 32f, Offset(sunX, sunY + 4f))
+                    val cloudX = 165f + (previewFrame * 27f) % 820f
+                    listOf(
+                        Offset(cloudX - 25f, 115f),
+                        Offset(cloudX, 99f),
+                        Offset(cloudX + 27f, 113f),
+                        Offset(cloudX + 45f, 117f)
+                    ).forEach { drawCircle(Color.White.copy(alpha = 0.8f), 19f, it) }
+                    drawLine(Color(0xFF7B6BB2), Offset(-30f, 405f), Offset(175f, 354f), 76f, StrokeCap.Round)
+                    drawLine(Color(0xFF7B6BB2), Offset(175f, 354f), Offset(342f, 407f), 76f, StrokeCap.Round)
+                    drawLine(Color(0xFF528A9A), Offset(300f, 431f), Offset(515f, 360f), 80f, StrokeCap.Round)
+                    drawLine(Color(0xFF528A9A), Offset(515f, 360f), Offset(725f, 415f), 80f, StrokeCap.Round)
+                    drawLine(Color(0xFF397B71), Offset(600f, 470f), Offset(790f, 425f), 82f, StrokeCap.Round)
+                    drawLine(Color(0xFF397B71), Offset(790f, 425f), Offset(990f, 478f), 82f, StrokeCap.Round)
+                }
+                DemoProject.FLOWER_BLOOM -> {
+                    val cx = 480f
+                    val cy = 240f
+                    drawLine(Color(0xFF4B9B67), Offset(cx, cy + 12f), Offset(cx + 8f, 493f), 12f, StrokeCap.Round)
+                    drawLine(Color(0xFF4B9B67), Offset(cx + 4f, 405f), Offset(cx - 80f, 362f), 18f, StrokeCap.Round)
+                    drawLine(Color(0xFF4B9B67), Offset(cx + 4f, 405f), Offset(cx + 94f, 366f), 18f, StrokeCap.Round)
+                    val petalRadius = 28f + previewFrame * 4.2f
+                    val petalColors = listOf(
+                        Color(0xFFFF86B7), Color(0xFFC5A2FF), Color(0xFFFFB1CF),
+                        Color(0xFFFF86B7), Color(0xFFBBAFFF), Color(0xFFFFB1CF),
+                        Color(0xFFFF86B7), Color(0xFFC5A2FF)
+                    )
+                    for (petal in 0..7) {
+                        val angle = petal * (Math.PI / 4.0) + phase * 0.035
+                        val end = Offset(
+                            cx + cos(angle).toFloat() * petalRadius,
+                            cy + sin(angle).toFloat() * petalRadius
+                        )
+                        drawLine(
+                            petalColors[petal],
+                            Offset(cx, cy),
+                            end,
+                            strokeWidth = 24f,
+                            cap = StrokeCap.Round
+                        )
+                    }
+                    drawCircle(Color(0xFFFFD166), 24f, Offset(cx, cy))
+                    drawCircle(Color(0xFFFFF0B8), 12f, Offset(cx - 4f, cy - 5f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsScreen(
     defaultFps: Int,
     onionSkin: Boolean,
