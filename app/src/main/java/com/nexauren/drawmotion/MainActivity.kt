@@ -519,7 +519,7 @@ private fun DrawmotionApp() {
                         val output = context.contentResolver.openOutputStream(uri)
                             ?: throw IOException("Não foi possível abrir o ficheiro de destino")
                         output.use { stream ->
-                            val bitmap = renderFrameBitmap(frame, 1920, 1080)
+                            val bitmap = renderFrameBitmap(frame, 1920, 1080, canvasMaterial)
                             try {
                                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
                                     throw IOException("A imagem PNG não foi codificada")
@@ -549,7 +549,7 @@ private fun DrawmotionApp() {
                         val output = context.contentResolver.openOutputStream(uri)
                             ?: throw IOException("Não foi possível abrir o ficheiro de destino")
                         output.use { stream ->
-                            val bitmap = renderFrameBitmap(frame, 1920, 1080)
+                            val bitmap = renderFrameBitmap(frame, 1920, 1080, canvasMaterial)
                             try {
                                 if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)) {
                                     throw IOException("A imagem JPEG não foi codificada")
@@ -573,13 +573,14 @@ private fun DrawmotionApp() {
     ) { uri: Uri? ->
         val frameSnapshot = frames.toList()
         val fpsSnapshot = fps
+        val materialSnapshot = canvasMaterial
         if (uri != null && frameSnapshot.isNotEmpty()) {
             exportScope.launch {
                 val ok = withContext(Dispatchers.IO) {
                     try {
                         val output = context.contentResolver.openOutputStream(uri)
                             ?: throw IOException("Não foi possível abrir o ficheiro de destino")
-                        output.use { stream -> exportAnimatedGif(stream, frameSnapshot, fpsSnapshot) }
+                        output.use { stream -> exportAnimatedGif(stream, frameSnapshot, fpsSnapshot, materialSnapshot) }
                         true
                     } catch (_: Exception) {
                         false
@@ -595,13 +596,14 @@ private fun DrawmotionApp() {
     ) { uri: Uri? ->
         val frameSnapshot = frames.toList()
         val fpsSnapshot = fps
+        val materialSnapshot = canvasMaterial
         if (uri != null && frameSnapshot.isNotEmpty()) {
             exportScope.launch {
                 val ok = withContext(Dispatchers.IO) {
                     try {
                         val output = context.contentResolver.openOutputStream(uri)
                             ?: throw IOException("Não foi possível abrir o ficheiro de destino")
-                        output.use { stream -> exportPngSequenceZip(stream, frameSnapshot, fpsSnapshot) }
+                        output.use { stream -> exportPngSequenceZip(stream, frameSnapshot, fpsSnapshot, materialSnapshot) }
                         true
                     } catch (_: Exception) {
                         false
@@ -2401,13 +2403,15 @@ private fun saveProject(
     context: Context,
     frames: List<AnimationFrame>,
     currentFrameIndex: Int,
-    fps: Int
+    fps: Int,
+    material: CanvasMaterial = CanvasMaterial.GRID
 ): Boolean {
     return try {
         val root = JSONObject()
-            .put("formatVersion", 1)
+            .put("formatVersion", 2)
             .put("currentFrame", currentFrameIndex)
             .put("fps", fps)
+            .put("material", material.name)
         val frameArray = JSONArray()
         frames.forEach { frame ->
             val frameObject = JSONObject().put("number", frame.number)
@@ -2417,6 +2421,7 @@ private fun saveProject(
                     .put("color", stroke.color)
                     .put("width", stroke.width.toDouble())
                     .put("tool", stroke.tool.name)
+                    .put("brush", stroke.brush.name)
                 val pointsArray = JSONArray()
                 stroke.points.forEach { point ->
                     pointsArray.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble()))
@@ -2440,6 +2445,8 @@ private fun loadProject(context: Context): SavedProject? {
         val data = context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
             .getString("project-json", null) ?: return null
         val root = JSONObject(data)
+        val material = runCatching { CanvasMaterial.valueOf(root.optString("material", CanvasMaterial.GRID.name)) }
+            .getOrDefault(CanvasMaterial.GRID)
         val frameArray = root.getJSONArray("frames")
         val loadedFrames = mutableListOf<AnimationFrame>()
         for (i in 0 until frameArray.length()) {
@@ -2451,6 +2458,8 @@ private fun loadProject(context: Context): SavedProject? {
                 val tool = runCatching {
                     DrawingTool.valueOf(strokeObject.optString("tool", DrawingTool.BRUSH.name))
                 }.getOrDefault(DrawingTool.BRUSH)
+                val brush = runCatching { BrushPreset.valueOf(strokeObject.optString("brush", BrushPreset.INK.name)) }
+                    .getOrDefault(BrushPreset.INK)
                 val pointsArray = strokeObject.optJSONArray("points") ?: JSONArray()
                 val points = mutableListOf<Offset>()
                 for (k in 0 until pointsArray.length()) {
@@ -2462,7 +2471,8 @@ private fun loadProject(context: Context): SavedProject? {
                         points = points,
                         color = strokeObject.optInt("color", AndroidColor.BLACK),
                         width = strokeObject.optDouble("width", 8.0).toFloat().coerceAtLeast(1f),
-                        tool = tool
+                        tool = tool,
+                        brush = brush
                     )
                 )
             }
@@ -2472,28 +2482,52 @@ private fun loadProject(context: Context): SavedProject? {
         SavedProject(
             frames = loadedFrames,
             currentFrame = root.optInt("currentFrame", 0),
-            fps = root.optInt("fps", 12)
+            fps = root.optInt("fps", 12),
+            material = material
         )
     } catch (_: Exception) {
         null
     }
 }
 
-private fun renderFrameBitmap(frame: AnimationFrame, outputWidth: Int, outputHeight: Int): Bitmap {
+private fun renderFrameBitmap(
+    frame: AnimationFrame,
+    outputWidth: Int,
+    outputHeight: Int,
+    material: CanvasMaterial = CanvasMaterial.GRID
+): Bitmap {
     require(outputWidth > 0 && outputHeight > 0) { "Dimensões da imagem inválidas" }
     val bitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bitmap)
-    canvas.drawColor(AndroidColor.WHITE)
+    canvas.drawColor(material.backgroundColor)
     canvas.scale(outputWidth / BOARD_WIDTH, outputHeight / BOARD_HEIGHT)
+    material.gridColor?.let { gridColor ->
+        val gridPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            color = gridColor
+            strokeWidth = 1f
+        }
+        for (x in 0..960 step 48) canvas.drawLine(x.toFloat(), 0f, x.toFloat(), BOARD_HEIGHT, gridPaint)
+        for (y in 0..540 step 48) canvas.drawLine(0f, y.toFloat(), BOARD_WIDTH, y.toFloat(), gridPaint)
+    }
 
     frame.strokes.forEach { stroke ->
         if (stroke.points.isEmpty()) return@forEach
-        val color = if (stroke.tool == DrawingTool.ERASER) AndroidColor.WHITE else stroke.color
+        val preset = if (stroke.tool == DrawingTool.ERASER) BrushPreset.INK else stroke.brush
+        val color = if (stroke.tool == DrawingTool.ERASER) material.backgroundColor else stroke.color
+        val styledWidth = (stroke.width * preset.widthScale).coerceAtLeast(1f)
         val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
             this.color = color
-            strokeWidth = stroke.width.coerceAtLeast(1f)
-            strokeCap = AndroidPaint.Cap.ROUND
+            alpha = if (stroke.tool == DrawingTool.ERASER) 255 else
+                (AndroidColor.alpha(color) * preset.opacity).roundToInt().coerceIn(0, 255)
+            strokeWidth = styledWidth
+            strokeCap = if (preset.squareCaps) AndroidPaint.Cap.SQUARE else AndroidPaint.Cap.ROUND
             strokeJoin = AndroidPaint.Join.ROUND
+            pathEffect = if (preset.dashed) {
+                DashPathEffect(floatArrayOf(max(3f, styledWidth * 0.45f), max(2f, styledWidth * 0.32f)), 0f)
+            } else null
+            maskFilter = if (preset == BrushPreset.AIRBRUSH) {
+                BlurMaskFilter(max(2f, styledWidth * 0.28f), BlurMaskFilter.Blur.NORMAL)
+            } else null
             style = AndroidPaint.Style.STROKE
         }
         val first = stroke.points.first()
@@ -2502,7 +2536,7 @@ private fun renderFrameBitmap(frame: AnimationFrame, outputWidth: Int, outputHei
             DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
                 if (stroke.points.size == 1) {
                     paint.style = AndroidPaint.Style.FILL
-                    canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
+                    canvas.drawCircle(first.x, first.y, styledWidth / 2f, paint)
                 } else {
                     val rect = RectF(
                         min(first.x, last.x),
@@ -2516,7 +2550,7 @@ private fun renderFrameBitmap(frame: AnimationFrame, outputWidth: Int, outputHei
             DrawingTool.LINE -> {
                 if (stroke.points.size == 1) {
                     paint.style = AndroidPaint.Style.FILL
-                    canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
+                    canvas.drawCircle(first.x, first.y, styledWidth / 2f, paint)
                 } else {
                     canvas.drawLine(first.x, first.y, last.x, last.y, paint)
                 }
@@ -2524,7 +2558,7 @@ private fun renderFrameBitmap(frame: AnimationFrame, outputWidth: Int, outputHei
             DrawingTool.BRUSH, DrawingTool.ERASER -> {
                 if (stroke.points.size == 1) {
                     paint.style = AndroidPaint.Style.FILL
-                    canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
+                    canvas.drawCircle(first.x, first.y, styledWidth / 2f, paint)
                 } else {
                     val path = AndroidPath().apply {
                         moveTo(first.x, first.y)
@@ -2538,7 +2572,12 @@ private fun renderFrameBitmap(frame: AnimationFrame, outputWidth: Int, outputHei
     return bitmap
 }
 
-private fun exportAnimatedGif(output: OutputStream, frames: List<AnimationFrame>, fps: Int) {
+private fun exportAnimatedGif(
+    output: OutputStream,
+    frames: List<AnimationFrame>,
+    fps: Int,
+    material: CanvasMaterial = CanvasMaterial.GRID
+) {
     require(frames.isNotEmpty()) { "Não existem frames para exportar" }
     val width = 480
     val height = 270
@@ -2547,7 +2586,7 @@ private fun exportAnimatedGif(output: OutputStream, frames: List<AnimationFrame>
     val options = ImageOptions().setDelay(delayMillis, TimeUnit.MILLISECONDS)
 
     frames.forEach { frame ->
-        val bitmap = renderFrameBitmap(frame, width, height)
+        val bitmap = renderFrameBitmap(frame, width, height, material)
         try {
             val argb = IntArray(width * height)
             bitmap.getPixels(argb, 0, width, 0, 0, width, height)
@@ -2560,13 +2599,18 @@ private fun exportAnimatedGif(output: OutputStream, frames: List<AnimationFrame>
     encoder.finishEncoding()
 }
 
-private fun exportPngSequenceZip(output: OutputStream, frames: List<AnimationFrame>, fps: Int) {
+private fun exportPngSequenceZip(
+    output: OutputStream,
+    frames: List<AnimationFrame>,
+    fps: Int,
+    material: CanvasMaterial = CanvasMaterial.GRID
+) {
     require(frames.isNotEmpty()) { "Não existem frames para exportar" }
     ZipOutputStream(output).use { zip ->
         frames.forEachIndexed { index, frame ->
             val fileName = String.format(Locale.US, "frame-%04d.png", index + 1)
             zip.putNextEntry(ZipEntry(fileName))
-            val bitmap = renderFrameBitmap(frame, 1920, 1080)
+            val bitmap = renderFrameBitmap(frame, 1920, 1080, material)
             try {
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, zip)) {
                     throw IOException("Não foi possível codificar o frame $fileName")
