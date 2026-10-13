@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
+import android.graphics.DashPathEffect
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint as AndroidPaint
@@ -40,6 +42,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,6 +79,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -120,18 +124,81 @@ private val TextPrimary = Color(0xFFF2F3F8)
 private val TextMuted = Color(0xFF9AA2B4)
 
 private enum class DrawingTool(val label: String, val symbol: String) {
-    BRUSH("Pincel", "✎"),
+    BRUSH("Pincéis", "✎"),
     ERASER("Borracha", "⌫"),
     LINE("Linha", "／"),
     RECTANGLE("Retângulo", "□"),
     ELLIPSE("Elipse", "◯")
 }
 
+private enum class BrushPreset(
+    val label: String,
+    val description: String,
+    val symbol: String,
+    val widthScale: Float,
+    val opacity: Float,
+    val dashed: Boolean = false,
+    val squareCaps: Boolean = false
+) {
+    INK("Tinta fina", "Contorno preciso e definido", "✒", 1f, 1f),
+    PENCIL("Lápis", "Esboço leve e discreto", "✎", 0.72f, 0.68f),
+    MARKER("Marcador", "Traço espesso e saturado", "▬", 1.55f, 0.72f),
+    AIRBRUSH("Aerógrafo", "Traço largo e suave", "☁", 2.1f, 0.22f),
+    CRAYON("Giz de cera", "Textura tracejada", "▧", 1.15f, 0.9f, dashed = true),
+    HIGHLIGHTER("Marca-texto", "Realce translúcido", "▰", 2.25f, 0.25f),
+    PASTEL("Pastel macio", "Cor suave e difusa", "●", 1.65f, 0.42f),
+    PIXEL("Pixel", "Traço de arestas quadradas", "▪", 1.05f, 1f, squareCaps = true)
+}
+
+private enum class CanvasMaterial(
+    val title: String,
+    val description: String,
+    val backgroundColor: Int,
+    val gridColor: Int?
+) {
+    PAPER("Papel branco", "Superfície limpa", AndroidColor.WHITE, null),
+    GRID("Papel quadriculado", "Grelha fina para desenhar", AndroidColor.WHITE, 0xFFE9EDF5.toInt()),
+    CREAM("Papel creme", "Tom quente e suave", 0xFFFFF4DC.toInt(), 0xFFF0E3C6.toInt()),
+    BLUEPRINT("Papel azul", "Grelha técnica azul", 0xFF123459.toInt(), 0xFF294A6D.toInt()),
+    NIGHT("Noite", "Fundo escuro para cenas luminosas", 0xFF101522.toInt(), null)
+}
+
+private enum class DemoProject(
+    val title: String,
+    val description: String,
+    val fps: Int,
+    val material: CanvasMaterial,
+    val frameCount: Int
+) {
+    COSMIC_BOUNCE(
+        "Bola cósmica",
+        "Uma esfera luminosa salta entre estrelas e deixa um rasto colorido.",
+        12,
+        CanvasMaterial.NIGHT,
+        12
+    ),
+    SUNSET(
+        "Sol de verão",
+        "Sol, nuvens e colinas em movimento, com cores quentes.",
+        12,
+        CanvasMaterial.CREAM,
+        12
+    ),
+    FLOWER_BLOOM(
+        "Flor a florescer",
+        "Pétalas abrem-se à volta do centro enquanto o caule permanece no lugar.",
+        12,
+        CanvasMaterial.PAPER,
+        12
+    )
+}
+
 private data class InkStroke(
     val points: List<Offset>,
     val color: Int,
     val width: Float,
-    val tool: DrawingTool
+    val tool: DrawingTool,
+    val brush: BrushPreset = BrushPreset.INK
 )
 
 private class AnimationFrame(
@@ -142,7 +209,8 @@ private class AnimationFrame(
 private data class SavedProject(
     val frames: List<AnimationFrame>,
     val currentFrame: Int,
-    val fps: Int
+    val fps: Int,
+    val material: CanvasMaterial = CanvasMaterial.GRID
 )
 
 class MainActivity : ComponentActivity() {
