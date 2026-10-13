@@ -58,8 +58,8 @@
     <button class="tool-btn" data-tool="text" title="Texto (T)"><span>T</span></button>
     <div class="rail-rule"></div>
     <button class="tool-btn" data-tool="hand" title="Mover palco (H)"><span>✥</span></button>
-    <button class="tool-btn" id="importImageBtn" title="Importar imagem como camada"><span>▧</span></button>
-    <input id="imageInput" type="file" accept="image/*" hidden>
+    <button class="tool-btn" id="importImageBtn" title="Importar imagem ou projeto"><span>▧</span></button>
+    <input id="imageInput" type="file" accept="image/*,.drawmotion,.json,application/json" hidden>
     <div class="rail-bottom">
       <button class="tool-btn" id="undoBtn" title="Desfazer (Ctrl+Z)"><span>↶</span></button>
       <button class="tool-btn" id="redoBtn" title="Refazer (Ctrl+Shift+Z)"><span>↷</span></button>
@@ -217,13 +217,14 @@ function saveCurrentFrame(){
 }
 async function loadLayerCanvases(){
  canvasStack.innerHTML="";
- const f=currentFrame();
+ const f=currentFrame(),pending=[];
  f.layers.forEach((layer,i)=>{
   const c=document.createElement("canvas");c.width=W;c.height=H;c.className="draw-layer";c.dataset.layer=String(i);c.style.opacity=String(layer.opacity);c.style.display=layer.visible?"block":"none";
   const ctx=c.getContext("2d");ctx.lineCap="round";ctx.lineJoin="round";
   canvasStack.appendChild(c);
-  if(layer.data)loadImage(layer.data).then(img=>{if(img&&c.isConnected)ctx.drawImage(img,0,0,W,H)}).catch(()=>{});
+  if(layer.data)pending.push(loadImage(layer.data).then(img=>{if(img&&c.isConnected)ctx.drawImage(img,0,0,W,H)}).catch(()=>{}));
  });
+ await Promise.all(pending);
  await drawOnion();drawGrid();updateHint();updateHistoryButtons();renderLayers();renderTimeline();
 }
 async function compositeFrame(frame,target){
@@ -510,7 +511,7 @@ $("newProjectBtn").addEventListener("click",newProject);$("helpBtn").addEventLis
 $("panelBtn").addEventListener("click",()=>{$("inspector").classList.toggle("mobile-open")});
 document.querySelectorAll("[data-panel]").forEach(b=>b.addEventListener("click",()=>{activePanel=b.dataset.panel;document.querySelectorAll("[data-panel]").forEach(x=>x.classList.toggle("active",x===b));["layersPanel","materialsPanel","effectsPanel"].forEach(id=>$(id).hidden=id!==activePanel)}));
 $("importImageBtn").addEventListener("click",()=> $("imageInput").click());
-$("imageInput").addEventListener("change",async e=>{const file=e.target.files&&e.target.files[0];if(file){const src=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(file)});await addImageAsLayer(src,file.name.replace(/\.[^.]+$/,""))}e.target.value=""});
+$("imageInput").addEventListener("change",async e=>{const file=e.target.files&&e.target.files[0];if(file){if(/\.(drawmotion|json)$/i.test(file.name)||file.type==="application/json"){await importProjectFile(file)}else if(file.type.startsWith("image/")){const src=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(file)});await addImageAsLayer(src,file.name.replace(/\.[^.]+$/,""))}else{announce("Formato não suportado")}}e.target.value=""});
 document.addEventListener("keydown",e=>{
  if(e.key==="Escape"){closeModal();return}
  const tag=e.target&&e.target.tagName;if(["INPUT","TEXTAREA","SELECT"].includes(tag))return;
