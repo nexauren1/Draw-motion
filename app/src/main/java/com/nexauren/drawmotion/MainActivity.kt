@@ -2451,12 +2451,12 @@ private fun DrawScope.drawInkStroke(
                 }
                 if (preset == BrushPreset.AIRBRUSH) {
                     drawPath(
-                        linePath,
-                        finalColor.copy(alpha = finalColor.alpha * 0.45f),
-                        Stroke(width = width * 2.2f, cap = lineCap, join = StrokeJoin.Round)
+                        path = linePath,
+                        color = finalColor.copy(alpha = finalColor.alpha * 0.45f),
+                        style = Stroke(width = width * 2.2f, cap = lineCap, join = StrokeJoin.Round)
                     )
                 }
-                drawPath(linePath, finalColor, lineStyle)
+                drawPath(path = linePath, color = finalColor, style = lineStyle)
 
                 if (stroke.tool == DrawingTool.RULER) {
                     val dx = last.x - first.x
@@ -2523,18 +2523,18 @@ private fun DrawScope.drawInkStroke(
                 }
                 if (preset == BrushPreset.AIRBRUSH) {
                     drawPath(
-                        path,
-                        finalColor.copy(alpha = finalColor.alpha * 0.45f),
-                        Stroke(width = width * 2.2f, cap = lineCap, join = StrokeJoin.Round)
+                        path = path,
+                        color = finalColor.copy(alpha = finalColor.alpha * 0.45f),
+                        style = Stroke(width = width * 2.2f, cap = lineCap, join = StrokeJoin.Round)
                     )
                 } else if (preset == BrushPreset.PASTEL) {
                     drawPath(
-                        path,
-                        finalColor.copy(alpha = finalColor.alpha * 0.22f),
-                        Stroke(width = width * 1.7f, cap = lineCap, join = StrokeJoin.Round)
+                        path = path,
+                        color = finalColor.copy(alpha = finalColor.alpha * 0.22f),
+                        style = Stroke(width = width * 1.7f, cap = lineCap, join = StrokeJoin.Round)
                     )
                 }
-                drawPath(path, finalColor, lineStyle)
+                drawPath(path = path, color = finalColor, style = lineStyle)
             }
         }
     }
