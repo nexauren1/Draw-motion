@@ -1728,6 +1728,7 @@ private fun AboutScreen(onBack: () -> Unit) {
     ) {
         PageHeader("Sobre o Drawmotion", onBack)
         Text("UM ESTÚDIO 2D PARA ANDROID", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("Versão 0.2.0-preview.1 · Pré-versão para testes", color = TextMuted, fontSize = 11.sp)
         Text(
             "O Drawmotion é um editor nativo para desenhar frame a frame, com ferramentas simples e uma área de trabalho horizontal.",
             color = TextPrimary,
