@@ -1741,11 +1741,11 @@ private fun AboutScreen(onBack: () -> Unit) {
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text("Já disponível", color = TextPrimary, fontWeight = FontWeight.Bold)
-                Text("• Pincel, borracha, linha, retângulo e elipse", color = TextMuted, fontSize = 12.sp)
-                Text("• Frames, duplicação e remoção", color = TextMuted, fontSize = 12.sp)
-                Text("• Onion skin e pré-visualização", color = TextMuted, fontSize = 12.sp)
-                Text("• Desfazer/refazer e autosave local", color = TextMuted, fontSize = 12.sp)
-                Text("• Exportação do frame atual para PNG", color = TextMuted, fontSize = 12.sp)
+                Text("• Biblioteca com vários projetos, nomes e detalhes", color = TextMuted, fontSize = 12.sp)
+                Text("• Oito pincéis, dedo/caneta digital e régua", color = TextMuted, fontSize = 12.sp)
+                Text("• Frames, onion skin, pré-visualização e efeitos", color = TextMuted, fontSize = 12.sp)
+                Text("• Autosave individual e recuperação do formato antigo", color = TextMuted, fontSize = 12.sp)
+                Text("• Exportação para PNG, JPEG, GIF, ZIP e MP4", color = TextMuted, fontSize = 12.sp)
             }
         }
         Card(
@@ -1755,7 +1755,7 @@ private fun AboutScreen(onBack: () -> Unit) {
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Próximas melhorias", color = TextPrimary, fontWeight = FontWeight.Bold)
-                Text("Biblioteca com vários projetos, camadas independentes, importação de imagens, áudio e exportação de animações para GIF/MP4.", color = TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("Camadas independentes, seleção e transformação de objetos, importação de imagens, pressão da caneta, áudio e assinatura de produção.", color = TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }
