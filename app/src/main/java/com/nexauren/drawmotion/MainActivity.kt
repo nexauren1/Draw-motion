@@ -1382,17 +1382,36 @@ private fun EffectOption(title: String, description: String, onClick: () -> Unit
     }
 }
 
+private fun projectDirectory(context: Context): File =
+    File(context.filesDir, "projects").apply { mkdirs() }
+
+private fun safeProjectSlug(name: String): String {
+    val normalized = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .lowercase(java.util.Locale.ROOT)
+    return normalized.replace(Regex("[^a-z0-9_-]+"), "-")
+        .trim('-')
+        .take(48)
+        .ifBlank { "projeto" }
+}
+
+private fun projectFile(context: Context, name: String): File =
+    File(projectDirectory(context), safeProjectSlug(name) + ".drawmotion")
+
 private fun saveProject(
     context: Context,
     frames: List<AnimationFrame>,
     currentFrameIndex: Int,
-    fps: Int
+    fps: Int,
+    projectName: String
 ): Boolean {
     return try {
         val root = JSONObject()
-            .put("formatVersion", 1)
-            .put("currentFrame", currentFrameIndex)
-            .put("fps", fps)
+            .put("formatVersion", 2)
+            .put("name", projectName.trim().ifBlank { "Meu projeto" })
+            .put("updatedAt", System.currentTimeMillis())
+            .put("currentFrame", currentFrameIndex.coerceIn(0, (frames.size - 1).coerceAtLeast(0)))
+            .put("fps", fps.coerceIn(1, 30))
         val frameArray = JSONArray()
         frames.forEach { frame ->
             val frameObject = JSONObject().put("number", frame.number)
@@ -1413,17 +1432,15 @@ private fun saveProject(
             frameArray.put(frameObject)
         }
         root.put("frames", frameArray)
-        context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
-            .edit().putString("project-json", root.toString()).commit()
+        projectFile(context, projectName).writeText(root.toString())
+        true
     } catch (_: Exception) {
         false
     }
 }
 
-private fun loadProject(context: Context): SavedProject? {
+private fun decodeProject(data: String, fallbackName: String = "Projeto recuperado"): SavedProject? {
     return try {
-        val data = context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
-            .getString("project-json", null) ?: return null
         val root = JSONObject(data)
         val frameArray = root.getJSONArray("frames")
         val loadedFrames = mutableListOf<AnimationFrame>()
@@ -1440,7 +1457,10 @@ private fun loadProject(context: Context): SavedProject? {
                 val points = mutableListOf<Offset>()
                 for (k in 0 until pointsArray.length()) {
                     val point = pointsArray.getJSONObject(k)
-                    points.add(Offset(point.optDouble("x", 0.0).toFloat(), point.optDouble("y", 0.0).toFloat()))
+                    points.add(Offset(
+                        point.optDouble("x", 0.0).toFloat(),
+                        point.optDouble("y", 0.0).toFloat()
+                    ))
                 }
                 frame.strokes.add(
                     InkStroke(
@@ -1455,12 +1475,252 @@ private fun loadProject(context: Context): SavedProject? {
         }
         if (loadedFrames.isEmpty()) return null
         SavedProject(
+            projectName = root.optString("name", fallbackName).ifBlank { fallbackName },
             frames = loadedFrames,
             currentFrame = root.optInt("currentFrame", 0),
             fps = root.optInt("fps", 12)
         )
     } catch (_: Exception) {
         null
+    }
+}
+
+private fun loadProject(context: Context, name: String? = null): SavedProject? {
+    return try {
+        val directory = projectDirectory(context)
+        val file = if (name != null) {
+            projectFile(context, name).takeIf { it.isFile }
+        } else {
+            directory.listFiles()
+                ?.filter { it.isFile && it.extension == "drawmotion" }
+                ?.maxByOrNull { it.lastModified() }
+        }
+        if (file != null) return decodeProject(file.readText(), name ?: "Projeto recuperado")
+        if (name != null) return null
+
+        // Migrate projects created by the prototype's single-project autosave.
+        val legacy = context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
+            .getString("project-json", null) ?: return null
+        val migrated = decodeProject(legacy, "Meu primeiro projeto") ?: return null
+        if (saveProject(context, migrated.frames, migrated.currentFrame, migrated.fps, migrated.projectName)) {
+            context.getSharedPreferences("drawmotion-project", Context.MODE_PRIVATE)
+                .edit().remove("project-json").apply()
+        }
+        migrated
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun listProjectInfos(context: Context): List<ProjectInfo> {
+    val files = projectDirectory(context).listFiles()
+        ?.filter { it.isFile && it.extension == "drawmotion" }
+        .orEmpty()
+    return files.mapNotNull { file ->
+        runCatching {
+            val root = JSONObject(file.readText())
+            val frames = root.optJSONArray("frames") ?: JSONArray()
+            var strokeCount = 0
+            for (i in 0 until frames.length()) {
+                strokeCount += frames.optJSONObject(i)?.optJSONArray("strokes")?.length() ?: 0
+            }
+            ProjectInfo(
+                name = root.optString("name", file.nameWithoutExtension),
+                frameCount = frames.length(),
+                strokeCount = strokeCount,
+                fps = root.optInt("fps", 12),
+                updatedAt = file.lastModified()
+            )
+        }.getOrNull()
+    }.sortedByDescending { it.updatedAt }
+}
+
+private fun deleteProjectFile(context: Context, name: String): Boolean =
+    projectFile(context, name).delete()
+
+private fun formatProjectTimestamp(timestamp: Long): String =
+    java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(timestamp))
+
+private fun exportAnimationMp4(
+    context: Context,
+    frames: List<AnimationFrame>,
+    fps: Int,
+    destination: Uri
+): Boolean {
+    val width = 960
+    val height = 540
+    val safeFps = fps.coerceIn(1, 30)
+    val outputFile = File(context.cacheDir, "drawmotion-${System.currentTimeMillis()}.mp4")
+    var codec: MediaCodec? = null
+    var muxer: MediaMuxer? = null
+    var codecStarted = false
+    var muxerStarted = false
+
+    try {
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        codec = encoder
+        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfoColorFormats.FLEXIBLE_YUV420)
+            setInteger(MediaFormat.KEY_BIT_RATE, 3_000_000)
+            setInteger(MediaFormat.KEY_FRAME_RATE, safeFps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        }
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+        codecStarted = true
+
+        val videoMuxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        muxer = videoMuxer
+        val bufferInfo = MediaCodec.BufferInfo()
+        var trackIndex = -1
+        var outputDone = false
+
+        fun drainEncoder(waitForOutput: Boolean) {
+            while (true) {
+                val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, if (waitForOutput) 10_000 else 0)
+                when {
+                    outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> return
+                    outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        if (muxerStarted) throw IllegalStateException("Formato de vídeo alterado mais de uma vez")
+                        trackIndex = videoMuxer.addTrack(encoder.outputFormat)
+                        videoMuxer.start()
+                        muxerStarted = true
+                    }
+                    outputIndex >= 0 -> {
+                        val outputBuffer = encoder.getOutputBuffer(outputIndex)
+                        if (outputBuffer != null && bufferInfo.size > 0 &&
+                            (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
+                        ) {
+                            if (!muxerStarted || trackIndex < 0) {
+                                throw IllegalStateException("O codificador não iniciou a faixa MP4")
+                            }
+                            outputBuffer.position(bufferInfo.offset)
+                            outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                            videoMuxer.writeSampleData(trackIndex, outputBuffer, bufferInfo)
+                        }
+                        val reachedEnd = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                        encoder.releaseOutputBuffer(outputIndex, false)
+                        if (reachedEnd) {
+                            outputDone = true
+                            return
+                        }
+                    }
+                    else -> return
+                }
+            }
+        }
+
+        val framesToExport = frames.ifEmpty { listOf(AnimationFrame(1)) }
+        framesToExport.forEachIndexed { index, frame ->
+            var inputIndex = encoder.dequeueInputBuffer(10_000)
+            var retries = 0
+            while (inputIndex < 0 && retries < 30) {
+                drainEncoder(false)
+                inputIndex = encoder.dequeueInputBuffer(10_000)
+                retries++
+            }
+            if (inputIndex < 0) throw IllegalStateException("Sem buffer de entrada de vídeo")
+            val inputImage = encoder.getInputImage(inputIndex)
+                ?: throw IllegalStateException("O codificador não aceita imagem YUV")
+            val bitmap = renderFrameBitmap(frame, width, height)
+            try {
+                writeBitmapToYuvImage(bitmap, inputImage)
+            } finally {
+                inputImage.close()
+                bitmap.recycle()
+            }
+            val presentationTimeUs = index * 1_000_000L / safeFps
+            encoder.queueInputBuffer(inputIndex, 0, width * height * 3 / 2, presentationTimeUs, 0)
+            drainEncoder(false)
+        }
+
+        var eosInputIndex = encoder.dequeueInputBuffer(10_000)
+        var eosRetries = 0
+        while (eosInputIndex < 0 && eosRetries < 30) {
+            drainEncoder(false)
+            eosInputIndex = encoder.dequeueInputBuffer(10_000)
+            eosRetries++
+        }
+        if (eosInputIndex < 0) throw IllegalStateException("Não foi possível terminar o vídeo")
+        encoder.queueInputBuffer(
+            eosInputIndex,
+            0,
+            0,
+            framesToExport.size * 1_000_000L / safeFps,
+            MediaCodec.BUFFER_FLAG_END_OF_STREAM
+        )
+        while (!outputDone) drainEncoder(true)
+        videoMuxer.stop()
+        muxerStarted = false
+
+        val outputStream = context.contentResolver.openOutputStream(destination) ?: return false
+        outputStream.use { stream ->
+            FileInputStream(outputFile).use { input -> input.copyTo(stream) }
+        }
+        return outputFile.isFile && outputFile.length() > 0
+    } catch (_: Exception) {
+        return false
+    } finally {
+        if (codecStarted) runCatching { codec?.stop() }
+        runCatching { codec?.release() }
+        if (muxerStarted) runCatching { muxer?.stop() }
+        runCatching { muxer?.release() }
+        outputFile.delete()
+    }
+}
+
+private object MediaCodecInfoColorFormats {
+    const val FLEXIBLE_YUV420 = 0x7F420888
+}
+
+private fun writeBitmapToYuvImage(bitmap: Bitmap, image: Image) {
+    val width = bitmap.width
+    val height = bitmap.height
+    val pixels = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    val planes = image.planes
+    val yPlane = planes[0]
+    val uPlane = planes[1]
+    val vPlane = planes[2]
+
+    fun writeSample(plane: Image.Plane, x: Int, y: Int, value: Int) {
+        val index = y * plane.rowStride + x * plane.pixelStride
+        plane.buffer.put(index, value.coerceIn(0, 255).toByte())
+    }
+
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            val color = pixels[y * width + x]
+            val red = AndroidColor.red(color)
+            val green = AndroidColor.green(color)
+            val blue = AndroidColor.blue(color)
+            val luminance = ((66 * red + 129 * green + 25 * blue + 128) shr 8) + 16
+            writeSample(yPlane, x, y, luminance)
+        }
+    }
+
+    for (y in 0 until height step 2) {
+        for (x in 0 until width step 2) {
+            var red = 0
+            var green = 0
+            var blue = 0
+            for (dy in 0..1) {
+                for (dx in 0..1) {
+                    val color = pixels[(y + dy) * width + x + dx]
+                    red += AndroidColor.red(color)
+                    green += AndroidColor.green(color)
+                    blue += AndroidColor.blue(color)
+                }
+            }
+            red /= 4
+            green /= 4
+            blue /= 4
+            val u = ((-38 * red - 74 * green + 112 * blue + 128) shr 8) + 128
+            val v = ((112 * red - 94 * green - 18 * blue + 128) shr 8) + 128
+            writeSample(uPlane, x / 2, y / 2, u)
+            writeSample(vPlane, x / 2, y / 2, v)
+        }
     }
 }
 
