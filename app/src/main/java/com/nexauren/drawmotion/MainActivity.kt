@@ -1880,6 +1880,8 @@ private fun EditorScreen(
     canUndo: Boolean,
     canRedo: Boolean,
     onHome: () -> Unit,
+    inputMode: DrawingInputMode,
+    onInputModeChange: (DrawingInputMode) -> Unit,
     onToolSelected: (DrawingTool) -> Unit,
     onBrushSelected: (BrushPreset) -> Unit,
     onMaterialSelected: (CanvasMaterial) -> Unit,
@@ -1928,6 +1930,7 @@ private fun EditorScreen(
                         DrawingTool.BRUSH -> "Pincéis"
                         DrawingTool.ERASER -> "Apagar"
                         DrawingTool.LINE -> "Linha"
+                        DrawingTool.RULER -> "Régua"
                         DrawingTool.RECTANGLE -> "Rect."
                         DrawingTool.ELLIPSE -> "Elipse"
                     },
@@ -1976,6 +1979,22 @@ private fun EditorScreen(
                 TinyActionButton("Exportar", onClick = onShowExport)
             }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text("ENTRADA", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                DrawingInputMode.values().forEach { mode ->
+                    FilterChip(
+                        selected = inputMode == mode,
+                        onClick = { onInputModeChange(mode) },
+                        label = { Text(mode.label, fontSize = 9.sp) },
+                        modifier = Modifier.height(27.dp)
+                    )
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1989,6 +2008,7 @@ private fun EditorScreen(
                     frames = frames,
                     currentFrameIndex = currentFrameIndex,
                     tool = selectedTool,
+                    inputMode = inputMode,
                     brushColor = brushColor,
                     brushSize = brushSize,
                     selectedBrush = selectedBrush,
@@ -2188,6 +2208,7 @@ private fun StageCanvas(
     frames: List<AnimationFrame>,
     currentFrameIndex: Int,
     tool: DrawingTool,
+    inputMode: DrawingInputMode,
     brushColor: Int,
     brushSize: Float,
     selectedBrush: BrushPreset,
@@ -2210,6 +2231,7 @@ private fun StageCanvas(
     val latestWidth = rememberUpdatedState(brushSize)
     val latestBrush = rememberUpdatedState(selectedBrush)
     val latestTool = rememberUpdatedState(tool)
+    val latestInputMode = rememberUpdatedState(inputMode)
     val latestOnCommit = rememberUpdatedState(onCommit)
     val latestZoomChange = rememberUpdatedState(onZoomChange)
     val latestRotationChange = rememberUpdatedState(onRotationChange)
@@ -2225,9 +2247,18 @@ private fun StageCanvas(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val startTool = latestTool.value
                     val points = mutableListOf<Offset>()
-                    points.add(pointerToBoard(down.position, size, latestZoom.value, latestRotation.value, latestPan.value))
-                    var drawing = true
-                    previewState.value = InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool, latestBrush.value)
+                    val drawAllowed = when (latestInputMode.value) {
+                        DrawingInputMode.BOTH -> true
+                        DrawingInputMode.TOUCH -> down.type == PointerType.Touch
+                        DrawingInputMode.STYLUS -> down.type == PointerType.Stylus
+                    }
+                    if (drawAllowed) {
+                        points.add(pointerToBoard(down.position, size, latestZoom.value, latestRotation.value, latestPan.value))
+                    }
+                    var drawing = drawAllowed
+                    previewState.value = if (drawing) {
+                        InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool, latestBrush.value)
+                    } else null
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -2390,11 +2421,29 @@ private fun DrawScope.drawInkStroke(
     val last = stroke.points.last()
 
     when (stroke.tool) {
-        DrawingTool.LINE -> {
+        DrawingTool.LINE, DrawingTool.RULER -> {
             if (stroke.points.size == 1) {
                 drawCircle(finalColor, radius = width / 2f, center = first)
             } else {
                 drawLine(finalColor, first, last, strokeWidth = width, cap = StrokeCap.Round)
+                if (stroke.tool == DrawingTool.RULER) {
+                    val dx = last.x - first.x
+                    val dy = last.y - first.y
+                    val length = hypot(dx, dy)
+                    if (length > 1f) {
+                        val normal = Offset(-dy / length, dx / length)
+                        for (tick in 1..20) {
+                            val point = first + (last - first) * (tick / 21f)
+                            val tickSize = if (tick % 5 == 0) 8f else 4f
+                            drawLine(
+                                finalColor,
+                                point - normal * tickSize,
+                                point + normal * tickSize,
+                                strokeWidth = (width * 0.65f).coerceAtLeast(0.7f)
+                            )
+                        }
+                    }
+                }
             }
         }
         DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
@@ -2956,12 +3005,33 @@ private fun renderFrameBitmap(
                     if (stroke.tool == DrawingTool.RECTANGLE) canvas.drawRect(rect, paint) else canvas.drawOval(rect, paint)
                 }
             }
-            DrawingTool.LINE -> {
+            DrawingTool.LINE, DrawingTool.RULER -> {
                 if (stroke.points.size == 1) {
                     paint.style = AndroidPaint.Style.FILL
                     canvas.drawCircle(first.x, first.y, styledWidth / 2f, paint)
                 } else {
                     canvas.drawLine(first.x, first.y, last.x, last.y, paint)
+                    if (stroke.tool == DrawingTool.RULER) {
+                        val dx = last.x - first.x
+                        val dy = last.y - first.y
+                        val length = hypot(dx, dy)
+                        if (length > 1f) {
+                            val normalX = -dy / length
+                            val normalY = dx / length
+                            for (tick in 1..20) {
+                                val x = first.x + dx * (tick / 21f)
+                                val y = first.y + dy * (tick / 21f)
+                                val tickSize = if (tick % 5 == 0) 8f else 4f
+                                canvas.drawLine(
+                                    x - normalX * tickSize,
+                                    y - normalY * tickSize,
+                                    x + normalX * tickSize,
+                                    y + normalY * tickSize,
+                                    paint
+                                )
+                            }
+                        }
+                    }
                 }
             }
             DrawingTool.BRUSH, DrawingTool.ERASER -> {
