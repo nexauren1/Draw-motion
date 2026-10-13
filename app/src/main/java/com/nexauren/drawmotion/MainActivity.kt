@@ -10,6 +10,14 @@ import android.graphics.Paint as AndroidPaint
 import android.graphics.Path as AndroidPath
 import android.graphics.RectF
 import android.net.Uri
+import java.io.IOException
+import java.io.OutputStream
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import com.squareup.gifencoder.GifEncoder
+import com.squareup.gifencoder.ImageOptions
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -58,6 +66,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -85,7 +94,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.toArgb
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
@@ -168,6 +180,8 @@ private fun DrawmotionApp() {
     var revision by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(false) }
     var showEffects by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    val exportScope = rememberCoroutineScope()
     var notice by remember { mutableStateOf("") }
     val undoStack = remember { mutableStateListOf<List<InkStroke>>() }
     val redoStack = remember { mutableStateListOf<List<InkStroke>>() }
@@ -194,6 +208,7 @@ private fun DrawmotionApp() {
     BackHandler(enabled = page != AppPage.HOME) {
         isPlaying = false
         showEffects = false
+        showExportDialog = false
         page = AppPage.HOME
     }
 
@@ -231,19 +246,106 @@ private fun DrawmotionApp() {
         }
     }
 
-    val exportLauncher = rememberLauncherForActivityResult(
+    val pngExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("image/png")
     ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val bitmap = renderFramePng(frames[currentFrameIndex])
-                context.contentResolver.openOutputStream(uri)?.use { stream ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        val frame = frames.getOrNull(currentFrameIndex)
+        if (uri != null && frame != null) {
+            exportScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        val output = context.contentResolver.openOutputStream(uri)
+                            ?: throw IOException("Não foi possível abrir o ficheiro de destino")
+                        output.use { stream ->
+                            val bitmap = renderFrameBitmap(frame, 1920, 1080)
+                            try {
+                                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
+                                    throw IOException("A imagem PNG não foi codificada")
+                                }
+                            } finally {
+                                bitmap.recycle()
+                            }
+                        }
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
                 }
-                bitmap.recycle()
-                notice = "Frame exportado em PNG"
-            } catch (_: Exception) {
-                notice = "Não foi possível exportar o PNG"
+                notice = if (ok) "Frame exportado em PNG" else "Falha ao exportar PNG"
+            }
+        }
+    }
+
+    val jpegExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/jpeg")
+    ) { uri: Uri? ->
+        val frame = frames.getOrNull(currentFrameIndex)
+        if (uri != null && frame != null) {
+            exportScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        val output = context.contentResolver.openOutputStream(uri)
+                            ?: throw IOException("Não foi possível abrir o ficheiro de destino")
+                        output.use { stream ->
+                            val bitmap = renderFrameBitmap(frame, 1920, 1080)
+                            try {
+                                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)) {
+                                    throw IOException("A imagem JPEG não foi codificada")
+                                }
+                            } finally {
+                                bitmap.recycle()
+                            }
+                        }
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                notice = if (ok) "Frame exportado em JPEG" else "Falha ao exportar JPEG"
+            }
+        }
+    }
+
+    val gifExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/gif")
+    ) { uri: Uri? ->
+        val frameSnapshot = frames.toList()
+        val fpsSnapshot = fps
+        if (uri != null && frameSnapshot.isNotEmpty()) {
+            exportScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        val output = context.contentResolver.openOutputStream(uri)
+                            ?: throw IOException("Não foi possível abrir o ficheiro de destino")
+                        output.use { stream -> exportAnimatedGif(stream, frameSnapshot, fpsSnapshot) }
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                notice = if (ok) "Animação exportada em GIF" else "Falha ao exportar GIF"
+            }
+        }
+    }
+
+    val pngSequenceExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri: Uri? ->
+        val frameSnapshot = frames.toList()
+        val fpsSnapshot = fps
+        if (uri != null && frameSnapshot.isNotEmpty()) {
+            exportScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        val output = context.contentResolver.openOutputStream(uri)
+                            ?: throw IOException("Não foi possível abrir o ficheiro de destino")
+                        output.use { stream -> exportPngSequenceZip(stream, frameSnapshot, fpsSnapshot) }
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                notice = if (ok) "Sequência PNG exportada em ZIP" else "Falha ao exportar sequência"
             }
         }
     }
@@ -381,9 +483,7 @@ private fun DrawmotionApp() {
                     pan = Offset.Zero
                 },
                 onSave = saveAction,
-                onExport = {
-                    exportLauncher.launch("drawmotion-frame-" + (currentFrameIndex + 1) + ".png")
-                },
+                onShowExport = { showExportDialog = true },
                 onCommit = commitStroke,
                 onPanChange = { pan = it },
                 onFrameSelected = {
@@ -415,6 +515,39 @@ private fun DrawmotionApp() {
                 onEffects = { showEffects = true }
             )
         }
+    }
+
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            containerColor = PanelBackground,
+            title = { Text("Exportar", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ExportOption("PNG — frame atual", "Imagem de alta resolução") {
+                        showExportDialog = false
+                        pngExportLauncher.launch("drawmotion-frame-" + (currentFrameIndex + 1) + ".png")
+                    }
+                    ExportOption("JPEG — frame atual", "Imagem comprimida, sem transparência") {
+                        showExportDialog = false
+                        jpegExportLauncher.launch("drawmotion-frame-" + (currentFrameIndex + 1) + ".jpg")
+                    }
+                    ExportOption("GIF — animação completa", "Todos os frames, sem áudio e com até 256 cores por frame") {
+                        showExportDialog = false
+                        gifExportLauncher.launch("drawmotion-animation.gif")
+                    }
+                    ExportOption("Sequência PNG — ZIP", "Um PNG por frame e um ficheiro com o FPS") {
+                        showExportDialog = false
+                        pngSequenceExportLauncher.launch("drawmotion-frames.zip")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showExportDialog = false }) {
+                    Text("Cancelar", color = Accent)
+                }
+            }
+        )
     }
 
     if (showEffects) {
@@ -773,6 +906,22 @@ private fun AboutScreen(onBack: () -> Unit) {
 }
 
 @Composable
+private fun ExportOption(title: String, description: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(Color(0xFF252936))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(title, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(description, color = TextMuted, fontSize = 9.sp, lineHeight = 12.sp)
+    }
+}
+
+@Composable
 private fun EditorScreen(
     projectName: String,
     notice: String,
@@ -798,7 +947,7 @@ private fun EditorScreen(
     onRotationChange: (Float) -> Unit,
     onResetViewport: () -> Unit,
     onSave: () -> Unit,
-    onExport: () -> Unit,
+    onShowExport: () -> Unit,
     onCommit: (InkStroke) -> Unit,
     onPanChange: (Offset) -> Unit,
     onFrameSelected: (Int) -> Unit,
@@ -874,7 +1023,7 @@ private fun EditorScreen(
                     modifier = Modifier.width(82.dp).height(26.dp)
                 )
                 TinyActionButton("Guardar", onClick = onSave)
-                TinyActionButton("PNG", onClick = onExport)
+                TinyActionButton("Exportar", onClick = onShowExport)
             }
 
             Box(
@@ -1672,11 +1821,12 @@ private fun loadProject(context: Context): SavedProject? {
     }
 }
 
-private fun renderFramePng(frame: AnimationFrame): Bitmap {
-    val bitmap = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+private fun renderFrameBitmap(frame: AnimationFrame, outputWidth: Int, outputHeight: Int): Bitmap {
+    require(outputWidth > 0 && outputHeight > 0) { "Dimensões da imagem inválidas" }
+    val bitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bitmap)
     canvas.drawColor(AndroidColor.WHITE)
-    canvas.scale(2f, 2f)
+    canvas.scale(outputWidth / BOARD_WIDTH, outputHeight / BOARD_HEIGHT)
 
     frame.strokes.forEach { stroke ->
         if (stroke.points.isEmpty()) return@forEach
@@ -1686,21 +1836,28 @@ private fun renderFramePng(frame: AnimationFrame): Bitmap {
             strokeWidth = stroke.width.coerceAtLeast(1f)
             strokeCap = AndroidPaint.Cap.ROUND
             strokeJoin = AndroidPaint.Join.ROUND
-            style = if (stroke.tool == DrawingTool.RECTANGLE) AndroidPaint.Style.STROKE else AndroidPaint.Style.STROKE
+            style = AndroidPaint.Style.STROKE
         }
         val first = stroke.points.first()
         val last = stroke.points.last()
         when (stroke.tool) {
             DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
                 if (stroke.points.size == 1) {
+                    paint.style = AndroidPaint.Style.FILL
                     canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
                 } else {
-                    val rect = RectF(min(first.x, last.x), min(first.y, last.y), max(first.x, last.x), max(first.y, last.y))
+                    val rect = RectF(
+                        min(first.x, last.x),
+                        min(first.y, last.y),
+                        max(first.x, last.x),
+                        max(first.y, last.y)
+                    )
                     if (stroke.tool == DrawingTool.RECTANGLE) canvas.drawRect(rect, paint) else canvas.drawOval(rect, paint)
                 }
             }
             DrawingTool.LINE -> {
                 if (stroke.points.size == 1) {
+                    paint.style = AndroidPaint.Style.FILL
                     canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
                 } else {
                     canvas.drawLine(first.x, first.y, last.x, last.y, paint)
@@ -1721,4 +1878,50 @@ private fun renderFramePng(frame: AnimationFrame): Bitmap {
         }
     }
     return bitmap
+}
+
+private fun exportAnimatedGif(output: OutputStream, frames: List<AnimationFrame>, fps: Int) {
+    require(frames.isNotEmpty()) { "Não existem frames para exportar" }
+    val width = 480
+    val height = 270
+    val delayMillis = (1000L / fps.coerceIn(1, 30)).coerceAtLeast(10L)
+    val encoder = GifEncoder(output, width, height, 0)
+    val options = ImageOptions().setDelay(delayMillis, TimeUnit.MILLISECONDS)
+
+    frames.forEach { frame ->
+        val bitmap = renderFrameBitmap(frame, width, height)
+        try {
+            val argb = IntArray(width * height)
+            bitmap.getPixels(argb, 0, width, 0, 0, width, height)
+            val rgb = IntArray(argb.size) { index -> argb[index] and 0x00FFFFFF }
+            encoder.addImage(rgb, width, options)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+    encoder.finishEncoding()
+}
+
+private fun exportPngSequenceZip(output: OutputStream, frames: List<AnimationFrame>, fps: Int) {
+    require(frames.isNotEmpty()) { "Não existem frames para exportar" }
+    ZipOutputStream(output).use { zip ->
+        frames.forEachIndexed { index, frame ->
+            val fileName = String.format(Locale.US, "frame-%04d.png", index + 1)
+            zip.putNextEntry(ZipEntry(fileName))
+            val bitmap = renderFrameBitmap(frame, 1920, 1080)
+            try {
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, zip)) {
+                    throw IOException("Não foi possível codificar o frame $fileName")
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            zip.closeEntry()
+        }
+        zip.putNextEntry(ZipEntry("animation-info.txt"))
+        zip.write(
+            ("FPS=$fps\nFRAMES=" + frames.size + "\nSIZE=1920x1080\nBACKGROUND=white\n").toByteArray(Charsets.UTF_8)
+        )
+        zip.closeEntry()
+    }
 }
