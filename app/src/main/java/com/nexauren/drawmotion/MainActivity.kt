@@ -215,6 +215,191 @@ private data class SavedProject(
     val material: CanvasMaterial = CanvasMaterial.GRID
 )
 
+private fun demoStroke(
+    points: List<Offset>,
+    color: Int,
+    width: Float,
+    brush: BrushPreset = BrushPreset.INK,
+    tool: DrawingTool = DrawingTool.BRUSH
+): InkStroke = InkStroke(points, color, width, tool, brush)
+
+private fun createDemoFrames(demo: DemoProject): List<AnimationFrame> {
+    return (0 until demo.frameCount).map { frameIndex ->
+        val strokes = mutableListOf<InkStroke>()
+        val phase = frameIndex.toFloat() / demo.frameCount * 6.283185f
+        when (demo) {
+            DemoProject.COSMIC_BOUNCE -> {
+                for (n in 0..34) {
+                    val x = ((n * 149 + 37) % 930 + 15).toFloat()
+                    val y = ((n * 83 + 19) % 500 + 15).toFloat()
+                    val color = when (n % 4) {
+                        0 -> 0xFFFFD166.toInt()
+                        1 -> 0xFFBBAFFF.toInt()
+                        2 -> 0xFF70D8F4.toInt()
+                        else -> 0xFF7F8CAB.toInt()
+                    }
+                    strokes.add(demoStroke(listOf(Offset(x, y)), color, if (n % 5 == 0) 7f else 3.5f))
+                }
+                strokes.add(
+                    demoStroke(
+                        listOf(Offset(20f, 445f), Offset(940f, 445f)),
+                        0xFF525978.toInt(),
+                        3f
+                    )
+                )
+                val x = 95f + frameIndex * 69f
+                val y = 328f - abs(sin((phase * 1.5f).toDouble()).toFloat()) * 128f
+                for (tail in 4 downTo 1) {
+                    strokes.add(
+                        demoStroke(
+                            listOf(Offset(x - tail * 20f, y + tail * 4f)),
+                            0x2D8D7CFF,
+                            7f + tail * 3f,
+                            BrushPreset.AIRBRUSH
+                        )
+                    )
+                }
+                strokes.add(
+                    demoStroke(
+                        listOf(Offset(x - 54f, y - 17f), Offset(x + 54f, y + 17f)),
+                        0x887C6AFF.toInt(),
+                        3f,
+                        BrushPreset.PASTEL,
+                        DrawingTool.ELLIPSE
+                    )
+                )
+                strokes.add(demoStroke(listOf(Offset(x, y)), 0xFF21A0F6.toInt(), 78f))
+                strokes.add(demoStroke(listOf(Offset(x + 3f, y + 2f)), 0xFF8D7CFF.toInt(), 54f))
+                strokes.add(demoStroke(listOf(Offset(x + 7f, y + 3f)), 0xFFFF7DA7.toInt(), 28f))
+                strokes.add(demoStroke(listOf(Offset(x - 10f, y - 11f)), AndroidColor.WHITE, 12f))
+            }
+            DemoProject.SUNSET -> {
+                val sunX = 480f + sin(phase.toDouble()).toFloat() * 36f
+                val sunY = 222f + sin((phase * 1.3f).toDouble()).toFloat() * 18f
+                strokes.add(demoStroke(listOf(Offset(sunX, sunY)), 0x2DFF9B54, 164f, BrushPreset.AIRBRUSH))
+                strokes.add(demoStroke(listOf(Offset(sunX, sunY)), 0xFFFF9B54.toInt(), 122f))
+                strokes.add(demoStroke(listOf(Offset(sunX, sunY + 2f)), 0xFFFFD166.toInt(), 96f))
+                strokes.add(demoStroke(listOf(Offset(sunX, sunY + 4f)), 0xFFFFF0B8.toInt(), 64f))
+
+                val cloudX = 125f + (frameIndex * 28f) % 760f
+                listOf(
+                    Offset(cloudX - 30f, 115f),
+                    Offset(cloudX, 98f),
+                    Offset(cloudX + 28f, 111f),
+                    Offset(cloudX + 45f, 116f)
+                ).forEach { center ->
+                    strokes.add(demoStroke(listOf(center), 0xFFE7EDF6.toInt(), 35f, BrushPreset.PASTEL))
+                }
+
+                strokes.add(
+                    demoStroke(
+                        listOf(
+                            Offset(-20f, 405f), Offset(175f, 354f),
+                            Offset(342f, 407f), Offset(515f, 320f),
+                            Offset(715f, 391f), Offset(980f, 335f)
+                        ),
+                        0xFF7B6BB2.toInt(),
+                        44f,
+                        BrushPreset.PASTEL
+                    )
+                )
+                strokes.add(
+                    demoStroke(
+                        listOf(
+                            Offset(-20f, 470f), Offset(160f, 438f),
+                            Offset(365f, 474f), Offset(540f, 410f),
+                            Offset(750f, 460f), Offset(980f, 425f)
+                        ),
+                        0xFF528A9A.toInt(),
+                        50f,
+                        BrushPreset.PASTEL
+                    )
+                )
+                strokes.add(
+                    demoStroke(
+                        listOf(
+                            Offset(-15f, 518f), Offset(190f, 490f),
+                            Offset(410f, 512f), Offset(650f, 465f),
+                            Offset(820f, 504f), Offset(980f, 480f)
+                        ),
+                        0xFF397B71.toInt(),
+                        48f,
+                        BrushPreset.PASTEL
+                    )
+                )
+                for (bird in 0..2) {
+                    val bx = 300f + bird * 52f + sin(phase.toDouble()).toFloat() * 10f
+                    val by = 160f + bird * 20f
+                    strokes.add(
+                        demoStroke(
+                            listOf(Offset(bx - 10f, by), Offset(bx, by + 6f), Offset(bx + 10f, by)),
+                            0xFF856E8E.toInt(),
+                            3f,
+                            BrushPreset.PENCIL
+                        )
+                    )
+                }
+            }
+            DemoProject.FLOWER_BLOOM -> {
+                val cx = 480f
+                val cy = 240f
+                strokes.add(
+                    demoStroke(
+                        listOf(
+                            Offset(cx, cy + 16f), Offset(cx + 3f, 310f),
+                            Offset(cx + 13f, 390f), Offset(cx + 8f, 493f)
+                        ),
+                        0xFF4B9B67.toInt(),
+                        12f,
+                        BrushPreset.PASTEL
+                    )
+                )
+                strokes.add(
+                    demoStroke(
+                        listOf(Offset(cx + 4f, 405f), Offset(cx - 24f, 376f), Offset(cx - 80f, 362f), Offset(cx - 52f, 405f)),
+                        0xFF60AD75.toInt(),
+                        15f,
+                        BrushPreset.PASTEL
+                    )
+                )
+                strokes.add(
+                    demoStroke(
+                        listOf(Offset(cx + 5f, 424f), Offset(cx + 34f, 389f), Offset(cx + 94f, 366f), Offset(cx + 62f, 414f)),
+                        0xFF367E59.toInt(),
+                        15f,
+                        BrushPreset.PASTEL
+                    )
+                )
+                val petalRadius = 27f + frameIndex * 4.4f
+                val petalColors = listOf(
+                    0xFFFF86B7.toInt(), 0xFFC5A2FF.toInt(),
+                    0xFFFFB1CF.toInt(), 0xFFFF86B7.toInt(),
+                    0xFFBBAFFF.toInt(), 0xFFFFB1CF.toInt(),
+                    0xFFFF86B7.toInt(), 0xFFC5A2FF.toInt()
+                )
+                for (petal in 0..7) {
+                    val angle = petal * (Math.PI / 4.0) + phase * 0.035
+                    val end = Offset(
+                        cx + cos(angle).toFloat() * petalRadius,
+                        cy + sin(angle).toFloat() * petalRadius
+                    )
+                    strokes.add(
+                        demoStroke(
+                            listOf(Offset(cx, cy), end),
+                            petalColors[petal],
+                            27f,
+                            BrushPreset.PASTEL
+                        )
+                    )
+                }
+                strokes.add(demoStroke(listOf(Offset(cx, cy)), 0xFFFFD166.toInt(), 46f))
+                strokes.add(demoStroke(listOf(Offset(cx - 4f, cy - 4f)), 0xFFFFF0B8.toInt(), 19f))
+            }
+        }
+        AnimationFrame(frameIndex + 1, strokes)
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
