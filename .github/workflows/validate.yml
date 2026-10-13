@@ -1,27 +1,9 @@
-name: Validate Drawmotion Studio
+name: Legacy web validation (disabled)
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 jobs:
-  syntax:
+  notice:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Check embedded JavaScript syntax
-        run: |
-          node - <<'NODE'
-          const fs = require('node:fs');
-          const html = fs.readFileSync('index.html', 'utf8');
-          const match = html.match(/<script>([\s\S]*?)<\/script>/i);
-          if (!match) throw new Error('Script da aplicação não encontrado.');
-          new Function(match[1]);
-          console.log('JavaScript válido; ' + match[1].split('\n').length + ' linhas verificadas.');
-          NODE
-      - name: Check PWA JSON
-        run: node -e "JSON.parse(require('node:fs').readFileSync('manifest.webmanifest', 'utf8')); console.log('Manifest válido.')"
+      - name: Explain migration to the Android app
+        run: echo "This legacy web workflow is disabled. Use the Android APK workflow."

@@ -1,62 +1,52 @@
-# Drawmotion Studio
+# Drawmotion — aplicativo Android
 
-**Um estúdio web de desenho e animação quadro a quadro**, com foco em uso por toque, telemóvel, tablet e computador.
+**Editor nativo de desenho e animação 2D**, desenvolvido em Kotlin com Jetpack Compose. O projeto principal é Android; não depende de uma página web para abrir o editor.
 
-> Estado atual: **pré-lançamento 0.1.0**. Esta é uma primeira versão funcional e uma base para testes. Ainda não substitui um editor de animação profissional e deve ser validada em vários dispositivos antes de ser anunciada como estável.
+> **Estado:** protótipo Android 0.1.0. A primeira base está a ser compilada e validada. Ainda não é uma substituição completa do FlipaClip.
 
-## Experimentar
+## Funcionalidades nesta primeira versão
 
-A app é estática e não precisa de servidor próprio. Quando o workflow de GitHub Pages terminar com sucesso, estará disponível em:
+- Desenho por toque com pincel, borracha, linha e retângulo.
+- Paleta rápida de cores e controlo do tamanho do pincel.
+- Palco 16:9 com zoom, deslocamento e rotação por gestos de dois dedos, além de controlos manuais.
+- Timeline com criação, duplicação e remoção de frames.
+- Onion skin para visualizar o frame anterior e o seguinte.
+- Pré-visualização da animação e velocidade ajustável entre 1 e 30 FPS.
+- Desfazer/refazer traços.
+- Efeitos básicos: espelhar horizontalmente, inverter verticalmente, monocromático e limpar frame.
+- Gravação local do projeto no dispositivo Android.
+- Exportação do frame atual para PNG de 1920 × 1080.
+- Workflow GitHub Actions para compilar e disponibilizar um APK de teste.
 
-**https://nexauren1.github.io/Draw-motion/**
+## Compilar localmente
 
-Acompanhar o lançamento e a lista de testes: [Issue #1 — ativar Pages e validar o editor](https://github.com/nexauren1/Draw-motion/issues/1).
+Requisitos: Android Studio ou JDK 17 + Android SDK 35 + Gradle 8.9.
 
-Se a página ainda não abrir, consulta o separador **Actions** no repositório e confirma se o workflow **Deploy Drawmotion Studio to GitHub Pages** terminou. A primeira publicação pode exigir alguns segundos/minutos e a ativação de Pages nas definições do repositório.
+Na raiz do repositório, executa:
 
-Para testar localmente, abre o ficheiro **index.html** num navegador moderno. A instalação PWA e o modo offline requerem um contexto HTTPS ou localhost.
+    gradle assembleDebug
 
-## Funcionalidades implementadas nesta versão
+O APK de teste é criado em:
 
-- Lápis, borracha, linha, retângulo, elipse, texto e balde de tinta.
-- Paleta de cores, conta-gotas, tamanho e opacidade do pincel.
-- Palco 960×540 com zoom, deslocamento, rotação manual e gestos de pinça/rotação com dois dedos.
-- Timeline com seleção, criação, duplicação e remoção de frames, FPS e duração de exposição.
-- Onion skin com frames anteriores e seguintes, em tons auxiliares.
-- Camadas por frame, visibilidade, opacidade, renomeação e importação de imagens como camadas.
-- Efeitos rápidos para a camada ativa; podem ser revertidos com Desfazer.
-- Desfazer/refazer para operações de desenho.
-- Exportação do frame em PNG, sprite sheet PNG, projeto editável **.drawmotion** e vídeo WebM quando o navegador suporta **MediaRecorder**.
-- Salvamento local com IndexedDB e fallback para armazenamento do navegador.
-- PWA instalável com shell offline e layout responsivo.
+    app/build/outputs/apk/debug/app-debug.apk
 
-## Limitações conhecidas da versão 0.1.0
+Também podes abrir o projeto no Android Studio e executar a configuração app.
 
-- A exportação de vídeo depende do suporte do navegador a MediaRecorder; o formato aqui gerado é WebM. GIF, MP4, sequência PNG em ZIP e áudio sincronizado ainda não estão implementados.
-- O projeto é guardado localmente no dispositivo/navegador. Não existe conta de utilizador nem sincronização na nuvem.
-- O editor ainda precisa de ensaios de desempenho com animações longas, de teste de pressão de caneta e de validação em Android/iOS.
-- A área de desenho tem tamanho de projeto fixo (960×540) nesta versão.
-- A exportação de vídeo, efeitos, preenchimento e muitos frames devem ser verificados em equipamentos reais antes de uma versão estável.
+## Obter o APK pelo GitHub
 
-## Desenvolvimento e verificações
+1. Abre **Actions** neste repositório.
+2. Seleciona **Android APK** e abre a execução mais recente.
+3. Quando a compilação terminar com sucesso, transfere o artefacto **drawmotion-debug-apk**.
 
-Não usa dependências externas em runtime. O código da aplicação está concentrado em index.html para facilitar a primeira distribuição. O GitHub Actions faz uma verificação de sintaxe do JavaScript e publica a aplicação via GitHub Pages.
+O APK de debug é destinado a teste e pode ser instalado manualmente num dispositivo Android. **Não é um pacote assinado para publicação na Google Play.** Uma distribuição pública exige testes adicionais e uma configuração de assinatura.
 
-1. Abre o separador **Actions** e verifica os workflows.
-2. Testa desenho, desfazer/refazer, frames, camadas, onion skin, salvar/reabrir e as quatro exportações.
-3. Regista erros como Issues com passos para reproduzir e dispositivo/navegador.
-4. Só depois dos testes, publica uma versão estável.
+## Próximas etapas
 
-## Plano de evolução
+Esta base ainda precisa de testes em dispositivos reais e de mais funcionalidades: camadas independentes, seleção e transformação de objetos, suporte melhorado a canetas com pressão, importação de imagens, exportação de animação para GIF/MP4, áudio e recuperação de projetos. Essas funções não devem ser consideradas concluídas até serem implementadas e verificadas.
 
-- **0.1.x — Robustez:** corrigir erros reportados, testes de gestos e recuperação de projetos.
-- **0.2 — Animação:** áudio na timeline, importação de vídeo/rotoscopia e melhor controlo de exposição.
-- **0.3 — Exportação:** sequência PNG em ZIP, GIF e MP4 através de pipeline suportado.
-- **0.4 — Desenho:** pressão de caneta, estabilização de traço, ferramentas de seleção/transformação e simetria.
-- **1.0 — Estável:** testes automatizados, desempenho e acessibilidade, documentação e processo de release validado.
+## Identificação técnica
 
-## Referências de produto
-
-O conjunto de funcionalidades foi planeado a partir de padrões comuns de apps de animação: timeline por frames, onion skin, camadas, controlo de FPS e exportação. Referências consultadas: [FlipaClip — nova timeline e layouts](https://support.flipaclip.com/article/113-newversion), [FlipaClip — onion skin](https://support.flipaclip.com/article/17-onion-skinning), [Krita — funcionalidades de animação](https://krita.org/en/features/) e [RoughAnimator — funcionalidades](https://roughanimator.com/).
-
-Drawmotion é um projeto independente; não é afiliado nem patrocinado por estas aplicações.
+- Pacote Android: com.nexauren.drawmotion
+- Linguagem: Kotlin
+- UI e desenho: Jetpack Compose
+- Versão inicial: 0.1.0

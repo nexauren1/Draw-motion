@@ -1,38 +1,9 @@
-name: Deploy Drawmotion Studio to GitHub Pages
+name: Legacy Pages deployment (disabled)
 on:
-  push:
-    branches: [main]
-    paths:
-      - "index.html"
-      - "manifest.webmanifest"
-      - "sw.js"
-      - "icon.svg"
-      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  notice:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - name: Upload site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Explain migration to the Android app
+        run: echo "This legacy web workflow is disabled. Use the Android APK workflow."

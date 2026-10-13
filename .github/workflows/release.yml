@@ -1,31 +1,9 @@
-name: Package Drawmotion Studio release
+name: Legacy web release (disabled)
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Etiqueta da versão, por exemplo v0.1.0-preview"
-        required: true
-        default: "v0.1.0-preview"
-      prerelease:
-        description: "Marcar esta versão como pré-lançamento"
-        required: true
-        type: boolean
-        default: true
-permissions:
-  contents: write
 jobs:
-  release:
+  notice:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Package static app
-        run: zip -j drawmotion-studio.zip index.html manifest.webmanifest sw.js icon.svg README.md
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag }}
-          name: Drawmotion Studio ${{ inputs.tag }}
-          prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: true
-          files: drawmotion-studio.zip
+      - name: Explain migration to the Android app
+        run: echo "This legacy web workflow is disabled. Use the Android APK workflow."
