@@ -761,6 +761,7 @@ private fun DrawmotionApp() {
     }
 
     val openNamedProject: (String) -> Unit = { name ->
+        saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
         val loaded = loadProject(context, name)
         if (loaded != null && loaded.frames.isNotEmpty()) {
             frames.clear()
@@ -783,6 +784,7 @@ private fun DrawmotionApp() {
     }
 
     val startNewProject: () -> Unit = {
+        saveProject(context, frames, currentFrameIndex, fps, canvasMaterial, projectName)
         val existing = listProjectInfos(context).map { it.name }
         val name = generateUniqueProjectName(existing, "Nova animação")
         createNamedProject(name)
@@ -793,7 +795,11 @@ private fun DrawmotionApp() {
             AppPage.HOME -> HomeScreen(
                 onContinue = { page = AppPage.EDITOR },
                 onNewProject = startNewProject,
-                onProjects = { page = AppPage.PROJECTS },
+                onProjects = {
+                    saveAction()
+                    refreshProjectCatalog()
+                    page = AppPage.PROJECTS
+                },
                 onTemplates = { page = AppPage.TEMPLATES },
                 onSettings = { page = AppPage.SETTINGS },
                 onAbout = { page = AppPage.ABOUT }
@@ -1247,43 +1253,217 @@ private fun PageHeader(title: String, onBack: () -> Unit) {
 
 @Composable
 private fun ProjectsScreen(
-    frameCount: Int,
+    projects: List<ProjectInfo>,
+    currentProjectName: String,
     onBack: () -> Unit,
-    onOpen: () -> Unit,
+    onOpenProject: (String) -> Unit,
     onTemplates: () -> Unit,
-    onNewProject: () -> Unit
+    onNewProject: (String) -> Unit,
+    onSaveAs: (String) -> Unit,
+    onDeleteProject: (String) -> Unit
 ) {
+    var showNameDialog by remember { mutableStateOf(false) }
+    var nameDialogMode by remember { mutableStateOf("new") }
+    var requestedName by remember { mutableStateOf("") }
+    var nameError by remember { mutableStateOf("") }
+
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         PageHeader("Projetos", onBack)
-        Text("PROJETO NESTE DISPOSITIVO", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = PanelBackground)
-        ) {
-            Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Animação local", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text("$frameCount frames • Guardado automaticamente", color = TextMuted, fontSize = 12.sp)
-                Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-                    Text("Abrir no estúdio")
+        Text(
+            "BIBLIOTECA LOCAL · ${projects.size} PROJETO(S)",
+            color = TextMuted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        if (projects.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = PanelBackground)
+            ) {
+                Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Ainda não há projetos guardados", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Cria um projeto ou entra no estúdio para começar a desenhar. Cada projeto fica guardado separadamente neste dispositivo.",
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        } else {
+            projects.forEach { project ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = PanelBackground)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(
+                                    project.name,
+                                    color = TextPrimary,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    if (project.name.equals(currentProjectName, ignoreCase = true)) "Projeto atual" else "Guardado neste dispositivo",
+                                    color = if (project.name.equals(currentProjectName, ignoreCase = true)) Accent else TextMuted,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Text(
+                                project.material.title,
+                                color = TextMuted,
+                                fontSize = 9.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ProjectDetail("FRAMES", project.frameCount.toString(), Modifier.weight(1f))
+                            ProjectDetail("TRAÇOS", project.strokeCount.toString(), Modifier.weight(1f))
+                            ProjectDetail("FPS", project.fps.toString(), Modifier.weight(1f))
+                        }
+                        Text(
+                            "Última alteração: ${formatProjectTimestamp(project.updatedAt)}",
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = { onOpenProject(project.name) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Abrir projeto", fontSize = 11.sp) }
+                            if (!project.name.equals(currentProjectName, ignoreCase = true)) {
+                                OutlinedButton(
+                                    onClick = { onDeleteProject(project.name) },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                                ) { Text("Eliminar", fontSize = 10.sp) }
+                            }
+                        }
+                    }
                 }
             }
         }
-        OutlinedButton(onClick = onNewProject, modifier = Modifier.fillMaxWidth()) {
-            Text("＋  Começar um novo projeto")
-        }
+
+        Button(
+            onClick = {
+                requestedName = generateUniqueProjectName(projects.map { it.name }, "Nova animação")
+                nameDialogMode = "new"
+                nameError = ""
+                showNameDialog = true
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("＋  Criar projeto") }
+
+        OutlinedButton(
+            onClick = {
+                requestedName = generateUniqueProjectName(projects.map { it.name }, "$currentProjectName - cópia")
+                nameDialogMode = "copy"
+                nameError = ""
+                showNameDialog = true
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Guardar projeto atual como…") }
+
         OutlinedButton(onClick = onTemplates, modifier = Modifier.fillMaxWidth()) {
             Text("▶  Explorar animações prontas")
         }
         Text(
-            "Esta versão mantém um rascunho local ativo. A biblioteca de vários projetos é uma melhoria futura.",
+            "Os detalhes do projeto incluem a contagem de frames e traços, a velocidade e a última alteração.",
             color = TextMuted,
             fontSize = 12.sp,
             lineHeight = 18.sp
         )
+    }
+
+    if (showNameDialog) {
+        AlertDialog(
+            onDismissRequest = { showNameDialog = false },
+            containerColor = PanelBackground,
+            title = {
+                Text(
+                    if (nameDialogMode == "copy") "Guardar cópia do projeto" else "Criar projeto",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (nameDialogMode == "copy")
+                            "O desenho, a timeline, os pincéis e o material do palco serão mantidos na cópia."
+                        else
+                            "O projeto novo começa com um palco vazio. O trabalho atual fica guardado.",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                    OutlinedTextField(
+                        value = requestedName,
+                        onValueChange = {
+                            requestedName = it.take(60)
+                            nameError = ""
+                        },
+                        singleLine = true,
+                        label = { Text("Nome do projeto") },
+                        isError = nameError.isNotBlank()
+                    )
+                    if (nameError.isNotBlank()) {
+                        Text(nameError, color = Color(0xFFFF8492), fontSize = 10.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val cleanName = requestedName.trim()
+                        when {
+                            cleanName.isBlank() -> nameError = "Escreve um nome para o projeto."
+                            projects.any { it.name.equals(cleanName, ignoreCase = true) } ->
+                                nameError = "Já existe um projeto com esse nome."
+                            nameDialogMode == "copy" -> {
+                                onSaveAs(cleanName)
+                                showNameDialog = false
+                            }
+                            else -> {
+                                onNewProject(cleanName)
+                                showNameDialog = false
+                            }
+                        }
+                    }
+                ) { Text("Confirmar", color = Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNameDialog = false }) {
+                    Text("Cancelar", color = TextMuted)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ProjectDetail(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF242834))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(label, color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
