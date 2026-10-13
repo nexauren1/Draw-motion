@@ -1,9 +1,0 @@
-name: Legacy web validation (disabled)
-on:
-  workflow_dispatch:
-jobs:
-  notice:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Explain migration to the Android app
-        run: echo "This legacy web workflow is disabled. Use the Android APK workflow."
