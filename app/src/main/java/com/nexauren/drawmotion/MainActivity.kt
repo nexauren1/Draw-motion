@@ -16,6 +16,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.MediaPlayer
 import android.net.Uri
 import java.io.File
 import java.io.FileInputStream
@@ -466,6 +467,11 @@ private fun DrawmotionApp() {
     var showExportDialog by remember { mutableStateOf(false) }
     var showBrushesDialog by remember { mutableStateOf(false) }
     var showMaterialsDialog by remember { mutableStateOf(false) }
+    var showAudioDialog by remember { mutableStateOf(false) }
+    var audioFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var showTutorial by remember { mutableStateOf(!settingsPrefs.getBoolean("tutorial-completed", false)) }
+    var tutorialPage by remember { mutableIntStateOf(0) }
+    var audioPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     val exportScope = rememberCoroutineScope()
     var notice by remember { mutableStateOf("") }
     val undoStack = remember { mutableStateListOf<List<InkStroke>>() }
@@ -476,6 +482,9 @@ private fun DrawmotionApp() {
     }
 
     val activeFrame = frames.getOrNull(currentFrameIndex) ?: frames.first()
+    LaunchedEffect(projectName, showAudioDialog) {
+        audioFiles = listProjectAudio(context, projectName)
+    }
 
     LaunchedEffect(page, immersiveEditor) {
         if (activity != null) {
@@ -500,6 +509,7 @@ private fun DrawmotionApp() {
         showExportDialog = false
         showBrushesDialog = false
         showMaterialsDialog = false
+        showAudioDialog = false
         page = AppPage.HOME
     }
 
@@ -541,6 +551,25 @@ private fun DrawmotionApp() {
         if (notice.isNotEmpty()) {
             delay(2200)
             notice = ""
+        }
+    }
+
+    val audioImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                val directory = projectAudioDirectory(context, projectName)
+                directory.mkdirs()
+                val displayName = queryDisplayName(context, uri).replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "audio-${System.currentTimeMillis()}.mp3" }
+                val extension = displayName.substringAfterLast('.', "mp3").lowercase(Locale.ROOT)
+                val safeName = if (extension in setOf("mp3", "wav", "m4a", "aac", "ogg", "flac")) displayName else "$displayName.mp3"
+                val target = File(directory, "${System.currentTimeMillis()}-$safeName")
+                context.contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+                    ?: throw IOException("Não foi possível ler o ficheiro de áudio")
+                audioFiles = listProjectAudio(context, projectName)
+                notice = "Áudio adicionado ao projeto"
+            }.onFailure { notice = "Não foi possível importar o áudio" }
         }
     }
 
@@ -941,7 +970,8 @@ private fun DrawmotionApp() {
                 onOnionSkin = { onionSkin = !onionSkin },
                 onUndo = undoAction,
                 onRedo = redoAction,
-                onEffects = { showEffects = true }
+                onEffects = { showEffects = true },
+                onAudio = { showAudioDialog = true }
             )
         }
     }
@@ -1011,6 +1041,58 @@ private fun DrawmotionApp() {
                     Text("Fechar", color = Accent)
                 }
             }
+        )
+    }
+
+    if (showTutorial) {
+        val tutorialTitles = listOf("Bem-vindo ao Drawmotion", "Desenha com controlo", "Anima e exporta")
+        val tutorialBodies = listOf(
+            "Cria projetos separados na biblioteca. O autosave guarda o teu trabalho neste dispositivo.",
+            "Escolhe Pincéis para abrir os oito estilos. Usa a régua, linha, retângulo, elipse e borracha. No topo, escolhe dedo, caneta digital ou ambos.",
+            "Adiciona frames na timeline, ajusta o FPS e usa Exportar para PNG, JPEG, GIF, ZIP ou MP4. No botão Áudio podes importar música e efeitos para o projeto e ouvi-los enquanto trabalhas."
+        )
+        AlertDialog(
+            onDismissRequest = { showTutorial = false; settingsPrefs.edit().putBoolean("tutorial-completed", true).apply() },
+            containerColor = PanelBackground,
+            title = { Text(tutorialTitles[tutorialPage], color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        repeat(tutorialTitles.size) { index -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(4.dp)).background(if (index == tutorialPage) Accent else PanelBorder)) }
+                    }
+                    Text(tutorialBodies[tutorialPage], color = TextMuted, fontSize = 13.sp, lineHeight = 20.sp)
+                    Text("Passo ${tutorialPage + 1} de ${tutorialTitles.size}", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            confirmButton = { TextButton(onClick = { if (tutorialPage < tutorialTitles.lastIndex) tutorialPage++ else { showTutorial = false; settingsPrefs.edit().putBoolean("tutorial-completed", true).apply() } }) { Text(if (tutorialPage < tutorialTitles.lastIndex) "Seguinte" else "Começar a desenhar", color = Accent) } },
+            dismissButton = { TextButton(onClick = { showTutorial = false; settingsPrefs.edit().putBoolean("tutorial-completed", true).apply() }) { Text("Saltar tutorial", color = TextMuted) } }
+        )
+    }
+
+    if (showAudioDialog) {
+        AlertDialog(
+            onDismissRequest = { showAudioDialog = false; audioPlayer?.release(); audioPlayer = null },
+            containerColor = PanelBackground,
+            title = { Text("Áudio do projeto", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Importa música, voz ou efeitos sonoros. Os ficheiros ficam guardados com este projeto e podem ser pré-visualizados aqui.", color = TextMuted, fontSize = 11.sp, lineHeight = 16.sp)
+                    if (audioFiles.isEmpty()) Text("Ainda não há áudio neste projeto.", color = TextMuted, fontSize = 12.sp)
+                    audioFiles.forEach { file ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(file.name.substringAfter('-', file.name), color = TextPrimary, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${(file.length() / 1024).coerceAtLeast(1)} KB", color = TextMuted, fontSize = 9.sp)
+                            }
+                            TextButton(onClick = { runCatching { audioPlayer?.release(); audioPlayer = MediaPlayer().apply { setDataSource(file.absolutePath); setOnCompletionListener { it.release(); audioPlayer = null }; prepare(); start() }; notice = "A reproduzir áudio" }.onFailure { notice = "Formato de áudio não suportado neste dispositivo" } }) { Text("▶", color = Accent) }
+                            TextButton(onClick = { audioPlayer?.release(); audioPlayer = null; file.delete(); audioFiles = listProjectAudio(context, projectName); notice = "Áudio removido" }) { Text("×", color = Color(0xFFFF8492)) }
+                        }
+                    }
+                    Button(onClick = { audioImportLauncher.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) { Text("＋ Importar música ou efeito") }
+                    Text("Nesta versão, o áudio é guardado e pode ser pré-escutado. A mistura automática de áudio no MP4 ainda não está implementada.", color = Color(0xFFFFD166), fontSize = 10.sp, lineHeight = 14.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAudioDialog = false; audioPlayer?.release(); audioPlayer = null }) { Text("Concluir", color = Accent) } }
         )
     }
 
@@ -1906,7 +1988,8 @@ private fun EditorScreen(
     onOnionSkin: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    onEffects: () -> Unit
+    onEffects: () -> Unit,
+    onAudio: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxSize().padding(horizontal = 7.dp, vertical = 6.dp),
@@ -2054,6 +2137,7 @@ private fun EditorScreen(
             Spacer(Modifier.weight(1f))
             RailButton(if (isPlaying) "Ⅱ" else "▶", if (isPlaying) "Pausa" else "Reproduzir", onClick = onPlay)
             RailButton(if (onionSkin) "◉" else "○", "Onion", selected = onionSkin, onClick = onOnionSkin)
+            RailButton("♫", "Áudio", onClick = onAudio)
             RailButton("✦", "Efeitos", onClick = onEffects)
         }
     }
@@ -2801,6 +2885,17 @@ private fun EffectOption(title: String, description: String, onClick: () -> Unit
         Text(title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text(description, color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
     }
+}
+
+private fun projectAudioDirectory(context: Context, projectName: String): File =
+    File(context.filesDir, "project-audio/${safeProjectSlug(projectName)}-${Integer.toHexString(projectName.trim().lowercase(Locale.ROOT).hashCode())}")
+
+private fun listProjectAudio(context: Context, projectName: String): List<File> =
+    projectAudioDirectory(context, projectName).listFiles()?.filter { it.isFile }?.sortedBy { it.name }.orEmpty()
+
+private fun queryDisplayName(context: Context, uri: Uri): String {
+    val cursor = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+    return cursor?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "audio-${System.currentTimeMillis()}.mp3"
 }
 
 private fun projectDirectory(context: Context): File =
