@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -79,6 +80,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -230,6 +232,8 @@ private fun DrawmotionApp() {
     val activity = context.findActivity()
     val settingsPrefs = remember { context.getSharedPreferences("drawmotion-settings", Context.MODE_PRIVATE) }
     var page by remember { mutableStateOf(AppPage.HOME) }
+    var selectedBrush by remember { mutableStateOf(BrushPreset.INK) }
+    var canvasMaterial by remember { mutableStateOf(CanvasMaterial.GRID) }
     var projectName by remember { mutableStateOf("Animação recente") }
     var defaultFps by remember { mutableIntStateOf(settingsPrefs.getInt("default-fps", 12).coerceIn(1, 30)) }
     var defaultOnionSkin by remember { mutableStateOf(settingsPrefs.getBoolean("default-onion-skin", true)) }
@@ -249,6 +253,8 @@ private fun DrawmotionApp() {
     var isPlaying by remember { mutableStateOf(false) }
     var showEffects by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
+    var showBrushesDialog by remember { mutableStateOf(false) }
+    var showMaterialsDialog by remember { mutableStateOf(false) }
     val exportScope = rememberCoroutineScope()
     var notice by remember { mutableStateOf("") }
     val undoStack = remember { mutableStateListOf<List<InkStroke>>() }
@@ -277,6 +283,8 @@ private fun DrawmotionApp() {
         isPlaying = false
         showEffects = false
         showExportDialog = false
+        showBrushesDialog = false
+        showMaterialsDialog = false
         page = AppPage.HOME
     }
 
@@ -287,6 +295,7 @@ private fun DrawmotionApp() {
             frames.addAll(loaded.frames)
             currentFrameIndex = loaded.currentFrame.coerceIn(0, frames.lastIndex)
             fps = loaded.fps.coerceIn(1, 30)
+            canvasMaterial = loaded.material
             revision++
             notice = "Projeto local carregado"
         }
@@ -303,7 +312,7 @@ private fun DrawmotionApp() {
     LaunchedEffect(revision, fps, frames.size, currentFrameIndex, isPlaying) {
         if (!isPlaying) {
             delay(650)
-            saveProject(context, frames, currentFrameIndex, fps)
+            saveProject(context, frames, currentFrameIndex, fps, canvasMaterial)
         }
     }
 
@@ -459,7 +468,7 @@ private fun DrawmotionApp() {
     }
 
     val saveAction: () -> Unit = {
-        val ok = saveProject(context, frames, currentFrameIndex, fps)
+        val ok = saveProject(context, frames, currentFrameIndex, fps, canvasMaterial)
         notice = if (ok) "Projeto guardado neste dispositivo" else "Falha ao guardar o projeto"
     }
 
@@ -469,6 +478,8 @@ private fun DrawmotionApp() {
         currentFrameIndex = 0
         fps = defaultFps
         selectedTool = DrawingTool.BRUSH
+        selectedBrush = BrushPreset.INK
+        canvasMaterial = CanvasMaterial.GRID
         brushColor = Color(0xFF272A35).toArgb()
         brushSize = 8f
         onionSkin = defaultOnionSkin
@@ -490,6 +501,7 @@ private fun DrawmotionApp() {
                 onContinue = { page = AppPage.EDITOR },
                 onNewProject = startNewProject,
                 onProjects = { page = AppPage.PROJECTS },
+                onTemplates = { page = AppPage.TEMPLATES },
                 onSettings = { page = AppPage.SETTINGS },
                 onAbout = { page = AppPage.ABOUT }
             )
@@ -497,7 +509,37 @@ private fun DrawmotionApp() {
                 frameCount = frames.size,
                 onBack = { page = AppPage.HOME },
                 onOpen = { page = AppPage.EDITOR },
+                onTemplates = { page = AppPage.TEMPLATES },
                 onNewProject = startNewProject
+            )
+            AppPage.TEMPLATES -> TemplatesScreen(
+                onBack = { page = AppPage.HOME },
+                onOpenTemplate = { demo ->
+                    frames.clear()
+                    frames.addAll(createDemoFrames(demo))
+                    currentFrameIndex = 0
+                    fps = demo.fps
+                    canvasMaterial = demo.material
+                    selectedTool = DrawingTool.BRUSH
+                    selectedBrush = when (demo) {
+                        DemoProject.COSMIC_BOUNCE -> BrushPreset.AIRBRUSH
+                        DemoProject.SUNSET -> BrushPreset.PASTEL
+                        DemoProject.FLOWER_BLOOM -> BrushPreset.PENCIL
+                    }
+                    brushColor = 0xFF332A55.toInt()
+                    brushSize = 8f
+                    onionSkin = false
+                    zoom = 1f
+                    rotation = 0f
+                    pan = Offset.Zero
+                    undoStack.clear()
+                    redoStack.clear()
+                    isPlaying = true
+                    projectName = demo.title
+                    revision++
+                    notice = "Modelo pronto • " + demo.frameCount + " frames"
+                    page = AppPage.EDITOR
+                }
             )
             AppPage.SETTINGS -> SettingsScreen(
                 defaultFps = defaultFps,
@@ -527,6 +569,8 @@ private fun DrawmotionApp() {
                 selectedTool = selectedTool,
                 brushColor = brushColor,
                 brushSize = brushSize,
+                selectedBrush = selectedBrush,
+                canvasMaterial = canvasMaterial,
                 onionSkin = onionSkin,
                 zoom = zoom,
                 rotation = rotation,
@@ -537,10 +581,14 @@ private fun DrawmotionApp() {
                 canRedo = redoStack.isNotEmpty(),
                 onHome = {
                     isPlaying = false
-                    saveProject(context, frames, currentFrameIndex, fps)
+                    saveProject(context, frames, currentFrameIndex, fps, canvasMaterial)
                     page = AppPage.HOME
                 },
                 onToolSelected = { selectedTool = it },
+                onBrushSelected = { selectedBrush = it; selectedTool = DrawingTool.BRUSH },
+                onMaterialSelected = { canvasMaterial = it; revision++ },
+                onShowBrushes = { showBrushesDialog = true },
+                onShowMaterials = { showMaterialsDialog = true },
                 onColorSelected = { brushColor = it },
                 onBrushSizeChange = { brushSize = it },
                 onZoomChange = { zoom = it.coerceIn(0.35f, 5f) },
@@ -673,7 +721,7 @@ private fun DrawmotionApp() {
     }
 }
 
-private enum class AppPage { HOME, PROJECTS, SETTINGS, ABOUT, EDITOR }
+private enum class AppPage { HOME, PROJECTS, TEMPLATES, SETTINGS, ABOUT, EDITOR }
 
 private fun Context.findActivity(): Activity? {
     var current: Context? = this
@@ -689,6 +737,7 @@ private fun HomeScreen(
     onContinue: () -> Unit,
     onNewProject: () -> Unit,
     onProjects: () -> Unit,
+    onTemplates: () -> Unit,
     onSettings: () -> Unit,
     onAbout: () -> Unit
 ) {
@@ -758,6 +807,13 @@ private fun HomeScreen(
         }
         HomeNavigationTile(
             modifier = Modifier.fillMaxWidth(),
+            symbol = "▶",
+            title = "Animações prontas",
+            description = "Explorar modelos em movimento e usá-los como ponto de partida",
+            onClick = onTemplates
+        )
+        HomeNavigationTile(
+            modifier = Modifier.fillMaxWidth(),
             symbol = "ⓘ",
             title = "Sobre o Drawmotion",
             description = "Funções disponíveis e próximas melhorias",
@@ -815,6 +871,7 @@ private fun ProjectsScreen(
     frameCount: Int,
     onBack: () -> Unit,
     onOpen: () -> Unit,
+    onTemplates: () -> Unit,
     onNewProject: () -> Unit
 ) {
     Column(
@@ -838,6 +895,9 @@ private fun ProjectsScreen(
         }
         OutlinedButton(onClick = onNewProject, modifier = Modifier.fillMaxWidth()) {
             Text("＋  Começar um novo projeto")
+        }
+        OutlinedButton(onClick = onTemplates, modifier = Modifier.fillMaxWidth()) {
+            Text("▶  Explorar animações prontas")
         }
         Text(
             "Esta versão mantém um rascunho local ativo. A biblioteca de vários projetos é uma melhoria futura.",
@@ -999,6 +1059,8 @@ private fun EditorScreen(
     selectedTool: DrawingTool,
     brushColor: Int,
     brushSize: Float,
+    selectedBrush: BrushPreset,
+    canvasMaterial: CanvasMaterial,
     onionSkin: Boolean,
     zoom: Float,
     rotation: Float,
@@ -1009,6 +1071,10 @@ private fun EditorScreen(
     canRedo: Boolean,
     onHome: () -> Unit,
     onToolSelected: (DrawingTool) -> Unit,
+    onBrushSelected: (BrushPreset) -> Unit,
+    onMaterialSelected: (CanvasMaterial) -> Unit,
+    onShowBrushes: () -> Unit,
+    onShowMaterials: () -> Unit,
     onColorSelected: (Int) -> Unit,
     onBrushSizeChange: (Float) -> Unit,
     onZoomChange: (Float) -> Unit,
@@ -1109,6 +1175,8 @@ private fun EditorScreen(
                     tool = selectedTool,
                     brushColor = brushColor,
                     brushSize = brushSize,
+                    selectedBrush = selectedBrush,
+                    canvasMaterial = canvasMaterial,
                     onionSkin = onionSkin,
                     zoom = zoom,
                     rotation = rotation,
