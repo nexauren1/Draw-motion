@@ -105,7 +105,8 @@ private enum class DrawingTool(val label: String, val symbol: String) {
     BRUSH("Pincel", "✎"),
     ERASER("Borracha", "⌫"),
     LINE("Linha", "／"),
-    RECTANGLE("Retângulo", "□")
+    RECTANGLE("Retângulo", "□"),
+    ELLIPSE("Elipse", "◯")
 }
 
 private data class InkStroke(
@@ -175,6 +176,14 @@ private fun DrawmotionApp() {
         while (isPlaying && frames.isNotEmpty()) {
             delay((1000L / fps.coerceAtLeast(1)).coerceAtLeast(1L))
             currentFrameIndex = (currentFrameIndex + 1) % frames.size
+        }
+    }
+
+    // Autosave after edits, but never serialize every frame while preview playback is running.
+    LaunchedEffect(revision, fps, frames.size, currentFrameIndex, isPlaying) {
+        if (!isPlaying) {
+            delay(650)
+            saveProject(context, frames, currentFrameIndex, fps)
         }
     }
 
@@ -365,6 +374,7 @@ private fun DrawmotionApp() {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     EffectOption("Espelhar horizontalmente", "Inverte o desenho da esquerda para a direita") {
                         undoStack.add(activeFrame.strokes.toList())
+                        redoStack.clear()
                         activeFrame.strokes.replaceAll { stroke ->
                             stroke.copy(points = stroke.points.map { Offset(BOARD_WIDTH - it.x, it.y) })
                         }
@@ -373,6 +383,7 @@ private fun DrawmotionApp() {
                     }
                     EffectOption("Inverter verticalmente", "Inverte o desenho de cima para baixo") {
                         undoStack.add(activeFrame.strokes.toList())
+                        redoStack.clear()
                         activeFrame.strokes.replaceAll { stroke ->
                             stroke.copy(points = stroke.points.map { Offset(it.x, BOARD_HEIGHT - it.y) })
                         }
@@ -381,6 +392,7 @@ private fun DrawmotionApp() {
                     }
                     EffectOption("Monocromático", "Converte os traços para tons de cinzento") {
                         undoStack.add(activeFrame.strokes.toList())
+                        redoStack.clear()
                         activeFrame.strokes.replaceAll { stroke ->
                             val gray = ((AndroidColor.red(stroke.color) * 0.299) +
                                 (AndroidColor.green(stroke.color) * 0.587) +
@@ -392,6 +404,7 @@ private fun DrawmotionApp() {
                     }
                     EffectOption("Limpar frame", "Remove todos os traços do frame selecionado") {
                         undoStack.add(activeFrame.strokes.toList())
+                        redoStack.clear()
                         activeFrame.strokes.clear()
                         revision++
                         showEffects = false
@@ -521,12 +534,9 @@ private fun StageCanvas(
                         }
 
                         if (pressed.size >= 2) {
+                            // A gesture that becomes a two-finger canvas move/rotate/zoom
+                            // must not leave an accidental dot or short mark behind.
                             if (drawing) {
-                                if (points.isNotEmpty()) {
-                                    latestOnCommit.value(
-                                        InkStroke(points.toList(), latestColor.value, latestWidth.value, startTool)
-                                    )
-                                }
                                 drawing = false
                                 previewState.value = null
                             }
@@ -680,7 +690,7 @@ private fun DrawScope.drawInkStroke(
                 drawLine(finalColor, first, last, strokeWidth = width, cap = StrokeCap.Round)
             }
         }
-        DrawingTool.RECTANGLE -> {
+        DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
             if (stroke.points.size == 1) {
                 drawCircle(finalColor, radius = width / 2f, center = first)
             } else {
@@ -688,12 +698,22 @@ private fun DrawScope.drawInkStroke(
                 val top = min(first.y, last.y)
                 val right = max(first.x, last.x)
                 val bottom = max(first.y, last.y)
-                drawRect(
-                    color = finalColor,
-                    topLeft = Offset(left, top),
-                    size = Size(right - left, bottom - top),
-                    style = Stroke(width = width)
-                )
+                val shapeSize = Size(right - left, bottom - top)
+                if (stroke.tool == DrawingTool.RECTANGLE) {
+                    drawRect(
+                        color = finalColor,
+                        topLeft = Offset(left, top),
+                        size = shapeSize,
+                        style = Stroke(width = width)
+                    )
+                } else {
+                    drawOval(
+                        color = finalColor,
+                        topLeft = Offset(left, top),
+                        size = shapeSize,
+                        style = Stroke(width = width)
+                    )
+                }
             }
         }
         DrawingTool.BRUSH, DrawingTool.ERASER -> {
@@ -1077,14 +1097,12 @@ private fun renderFramePng(frame: AnimationFrame): Bitmap {
         val first = stroke.points.first()
         val last = stroke.points.last()
         when (stroke.tool) {
-            DrawingTool.RECTANGLE -> {
+            DrawingTool.RECTANGLE, DrawingTool.ELLIPSE -> {
                 if (stroke.points.size == 1) {
                     canvas.drawCircle(first.x, first.y, stroke.width / 2f, paint)
                 } else {
-                    canvas.drawRect(
-                        RectF(min(first.x, last.x), min(first.y, last.y), max(first.x, last.x), max(first.y, last.y)),
-                        paint
-                    )
+                    val rect = RectF(min(first.x, last.x), min(first.y, last.y), max(first.x, last.x), max(first.y, last.y))
+                    if (stroke.tool == DrawingTool.RECTANGLE) canvas.drawRect(rect, paint) else canvas.drawOval(rect, paint)
                 }
             }
             DrawingTool.LINE -> {

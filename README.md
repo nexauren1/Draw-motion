@@ -1,52 +1,51 @@
 # Drawmotion — aplicativo Android
 
-**Editor nativo de desenho e animação 2D**, desenvolvido em Kotlin com Jetpack Compose. O projeto principal é Android; não depende de uma página web para abrir o editor.
+**Editor nativo de desenho e animação 2D**, desenvolvido em Kotlin com Jetpack Compose. Este é um aplicativo Android; não precisa de uma página web para executar o editor.
 
-> **Estado:** protótipo Android 0.1.0. A primeira base está a ser compilada e validada. Ainda não é uma substituição completa do FlipaClip.
+> **Estado:** protótipo Android 0.1.1. O APK é uma versão de teste, não uma release estável.
 
-## Funcionalidades nesta primeira versão
+## Funcionalidades implementadas
 
-- Desenho por toque com pincel, borracha, linha e retângulo.
+- Desenho por toque com pincel, borracha, linha, retângulo e elipse.
 - Paleta rápida de cores e controlo do tamanho do pincel.
 - Palco 16:9 com zoom, deslocamento e rotação por gestos de dois dedos, além de controlos manuais.
 - Timeline com criação, duplicação e remoção de frames.
-- Onion skin para visualizar o frame anterior e o seguinte.
-- Pré-visualização da animação e velocidade ajustável entre 1 e 30 FPS.
-- Desfazer/refazer traços.
+- Onion skin para visualizar frames adjacentes.
+- Pré-visualização e velocidade ajustável entre 1 e 30 FPS.
+- Desfazer/refazer; mudanças de gestos para dois dedos não devem deixar marcas acidentais.
 - Efeitos básicos: espelhar horizontalmente, inverter verticalmente, monocromático e limpar frame.
-- Gravação local do projeto no dispositivo Android.
+- Autosave local automático e botão para guardar imediatamente.
 - Exportação do frame atual para PNG de 1920 × 1080.
-- Workflow GitHub Actions para compilar e disponibilizar um APK de teste.
+- Workflow GitHub Actions para compilar e verificar a estrutura e assinatura do APK.
+
+## Como descarregar e instalar o APK
+
+1. Abre **Actions** neste repositório e escolhe a execução **Android APK** que terminou com sucesso.
+2. Em **Artifacts**, descarrega `drawmotion-android-apk`. O download deste artefacto é um ZIP.
+3. **Extrai o ZIP primeiro.** Dentro dele encontrarás `app-debug.apk`. Instala esse ficheiro APK — não tentes instalar o ZIP.
+4. O Android poderá pedir que autorizes a instalação de aplicações a partir da aplicação utilizada para abrir o ficheiro.
+
+O app agora suporta Android 6.0 (API 23) ou mais recente. Se continuar a aparecer “Ocorreu um erro ao analisar o pacote”, confirma que extraíste o APK e que o ficheiro termina em `.apk`, não `.zip`. A compilação verifica também a assinatura e a estrutura do APK.
 
 ## Compilar localmente
 
-Requisitos: Android Studio ou JDK 17 + Android SDK 35 + Gradle 8.9.
-
-Na raiz do repositório, executa:
+Requisitos: JDK 17, Android SDK Platform 35 e Gradle 8.9.
 
     gradle assembleDebug
 
-O APK de teste é criado em:
+O APK é criado em:
 
     app/build/outputs/apk/debug/app-debug.apk
 
-Também podes abrir o projeto no Android Studio e executar a configuração app.
-
-## Obter o APK pelo GitHub
-
-1. Abre **Actions** neste repositório.
-2. Seleciona **Android APK** e abre a execução mais recente.
-3. Quando a compilação terminar com sucesso, transfere o artefacto **drawmotion-debug-apk**.
-
-O APK de debug é destinado a teste e pode ser instalado manualmente num dispositivo Android. **Não é um pacote assinado para publicação na Google Play.** Uma distribuição pública exige testes adicionais e uma configuração de assinatura.
-
 ## Próximas etapas
 
-Esta base ainda precisa de testes em dispositivos reais e de mais funcionalidades: camadas independentes, seleção e transformação de objetos, suporte melhorado a canetas com pressão, importação de imagens, exportação de animação para GIF/MP4, áudio e recuperação de projetos. Essas funções não devem ser consideradas concluídas até serem implementadas e verificadas.
+A base ainda precisa de testes em dispositivos reais e de mais funcionalidades: camadas independentes, seleção e transformação de objetos, importação de imagens, suporte avançado à pressão da caneta, exportação de animação para GIF/MP4, áudio e recuperação de projetos. Essas funções não devem ser consideradas concluídas até serem implementadas e verificadas.
 
 ## Identificação técnica
 
-- Pacote Android: com.nexauren.drawmotion
+- Pacote Android: `com.nexauren.drawmotion`
 - Linguagem: Kotlin
 - UI e desenho: Jetpack Compose
-- Versão inicial: 0.1.0
+- Versão: `0.1.1`
+- `minSdk`: 23
+- `targetSdk`: 34
